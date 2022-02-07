@@ -27,7 +27,7 @@ source-repository head
 
 library
   exposed-modules:
-      Lib
+      IndexNormalization
   other-modules:
       Paths_p10
   hs-source-dirs:

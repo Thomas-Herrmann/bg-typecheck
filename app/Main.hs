@@ -1,6 +1,6 @@
 module Main where
 
-import Lib
+import IndexNormalization
 
 main :: IO ()
-main = someFunc
+main = print "the beginning"
