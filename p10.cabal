@@ -27,7 +27,7 @@ source-repository head
 
 library
   exposed-modules:
-      IndexNormalization
+      Normalization
     , Index
     , Constraint
   other-modules:
