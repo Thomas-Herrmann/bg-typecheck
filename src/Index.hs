@@ -28,6 +28,24 @@ instance Show Factor where
   show (NatI n) = show n
   show (VarI i) = "i" ++ show i
 
+instance Ord Term where
+  (f :*: t) `compare` (f' :*: t') =
+    case f `compare` f' of
+      LT -> LT
+      GT -> GT
+      EQ -> t `compare` t'
+  (_ :*: _) `compare` FacI (NatI _) = GT
+  (_ :*: _) `compare` FacI (VarI _) = LT
+  FacI f `compare` FacI f' = f `compare` f'
+  FacI (NatI _) `compare` (_ :*: _) = LT
+  FacI (VarI _) `compare` (_ :*: _) = GT
+
+instance Ord Factor where
+  NatI n `compare` NatI m = n `compare` m
+  NatI _ `compare` VarI _ = LT
+  VarI i `compare` VarI j = i `compare` j
+  VarI _ `compare` NatI _ = GT
+
 -- indices must be normalized prior
 subIndex :: (Natural -> Natural -> Bool) -> Index -> Index -> Bool
 subIndex comp (t :+: ixI) (t' :+: ixI') = subTerm comp t t' && subIndex comp ixI ixI'

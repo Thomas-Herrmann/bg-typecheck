@@ -4,6 +4,7 @@ module Normalization
 where
 
 import Constraint (Constraint (..))
+import Data.List (sort)
 import GHC.Natural (Natural)
 import Index (Factor (..), Index (..), Term (..))
 
@@ -28,14 +29,39 @@ reduceTerm (NatI n :*: FacI (NatI m)) = FacI $ NatI (n * m)
 reduceTerm (NatI n :*: (NatI m :*: FacI f)) = NatI (n * m) :*: FacI f
 reduceTerm t = t
 
--- TODO: sort
+sortFactors :: Index -> Index
+sortFactors (t :+: ixI) = sortCoefficients t :+: sortFactors ixI
+sortFactors (TerI t) = TerI $ sortCoefficients t
+
+sortCoefficients :: Term -> Term
+sortCoefficients t = toTerm $ sort (coefficients t)
+  where
+    coefficients (f :*: t) = f : coefficients t
+    coefficients (FacI f) = [f]
+
+    toTerm [f] = FacI f
+    toTerm (f : fs) = f :*: toTerm fs
+    toTerm _ = error "Should not happen; A term has at least one coefficient"
+
+sortTerms :: Index -> Index
+sortTerms ixI = toIndex $ sort (terms ixI)
+  where
+    terms (t :+: ixI') = t : terms ixI'
+    terms (TerI t) = [t]
+
+    toIndex [t] = TerI t
+    toIndex (t : ts) = t :+: toIndex ts
+    toIndex _ = error "Should not happen; An index has at least one term"
 
 normalize :: Constraint -> Constraint
-normalize (Constraint (ixI, ixJ)) = Constraint (ixI', ixJ')
+normalize (Constraint (ixI, ixJ)) = Constraint (ixI'', ixJ'')
   where
-    ixI' = reduceStepAll $ divideFactors divisor ixI
-    ixJ' = reduceStepAll $ divideFactors divisor ixJ
-    divisor = multiGCD $ factors ixI ++ factors ixJ
+    ixI' = sortTerms . sortFactors $ reduceStepAll ixI
+    ixJ' = sortTerms . sortFactors $ reduceStepAll ixJ
+
+    ixI'' = reduceStepAll $ divideFactors divisor ixI'
+    ixJ'' = reduceStepAll $ divideFactors divisor ixJ'
+    divisor = multiGCD $ factors ixI' ++ factors ixJ'
 
 factors :: Index -> [Natural]
 factors (t :+: ixI) = factor t : factors ixI
