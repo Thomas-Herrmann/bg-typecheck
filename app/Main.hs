@@ -1,6 +1,7 @@
 module Main where
 
-import Constraint (Constraint (..))
+import Constraint (Constraint (..), transitiveClosure)
+import Data.Set as Set
 import Index (Index (..))
 import Normalization (normalize)
 
@@ -10,5 +11,10 @@ testIxJ = FacI 10 (VarI 1)
 
 testConstraint = Constraint (testixI, testIxJ)
 
+testConstraint' = Constraint (FacI 11 (VarI 1), FacI 12 (VarI 1))
+
 main :: IO ()
-main = print testConstraint >> print (normalize testConstraint)
+main = do
+  print [testConstraint, testConstraint']
+  print (Prelude.map normalize [testConstraint, testConstraint'])
+  print (transitiveClosure $ Set.fromList $ Prelude.map normalize [testConstraint, testConstraint'])

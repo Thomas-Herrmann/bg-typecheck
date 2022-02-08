@@ -36,6 +36,7 @@ library
       src
   build-depends:
       base >=4.7 && <5
+    , containers
   default-language: Haskell2010
 
 executable p10-exe
@@ -48,6 +49,7 @@ executable p10-exe
   build-depends:
       base >=4.7 && <5
     , p10
+    , containers
   default-language: Haskell2010
 
 test-suite p10-test
