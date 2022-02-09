@@ -1,6 +1,7 @@
 module Constraint
   ( Constraint (..),
     transitiveClosure,
+    subConstraint,
   )
 where
 
@@ -8,17 +9,20 @@ import Data.Set as Set
 import Index (Index (..), subIndex)
 
 -- represents I <= J
-newtype Constraint = Constraint (Index, Index) deriving (Eq)
+data Constraint = Index :<=: Index deriving (Eq, Ord)
+
 
 instance Show Constraint where
-  show (Constraint (ixI, ixJ)) = show ixI ++ " <= " ++ show ixJ
+  show (ixI :<=: ixJ) = show ixI ++ " <= " ++ show ixJ
 
-instance Ord Constraint where
-  Constraint (ixI, ixJ) <= Constraint (ixI', ixJ') = subIndex (>=) ixI ixI' && subIndex (<=) ixJ ixJ'
+
+subConstraint :: Constraint -> Constraint -> Bool
+subConstraint (ixI :<=: ixJ) (ixI' :<=: ixJ') = subIndex ixI ixI' && subIndex ixJ' ixJ
+
 
 transitiveClosure :: Set Constraint -> Set Constraint
 transitiveClosure constraints
   | closure == constraints = constraints
   | otherwise = transitiveClosure closure
   where
-    closure = constraints `union` Set.fromList [Constraint (ixI, ixJ') | Constraint (ixI, ixJ) <- Set.toList constraints, Constraint (ixI', ixJ') <- Set.toList constraints, subIndex (<=) ixJ ixI']
+    closure = constraints `union` Set.fromList [ ixI :<=: ixJ' | ixI :<=: ixJ <- Set.toList constraints, ixI' :<=: ixJ' <- Set.toList constraints, subIndex ixJ ixI']

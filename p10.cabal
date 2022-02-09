@@ -30,6 +30,7 @@ library
       Normalization
     , Index
     , Constraint
+    , ConstraintInclusion
   other-modules:
       Paths_p10
   hs-source-dirs:

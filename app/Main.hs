@@ -2,23 +2,22 @@ module Main where
 
 import Constraint (Constraint (..), transitiveClosure)
 import Data.Set as Set
-import Index (Factor (..), Index (..), Term (..))
+import Index (Index (..), Term (..))
 import Normalization (normalize)
+import ConstraintInclusion (constraintsInclude)
 
---testixI = AddI (FacI 10 (NatI 10)) (FacI 5 (AddI (AddI (NatI 4) (NatI 5)) (VarI 0)))
+testixI = 104 :+: [4 :*: (0, [1])]
+testixJ = 28 :+: [12 :*: (0, []), 8 :*: (2, [])]
 
-testixI = (NatI 10 :*: FacI (NatI 10)) :+: ((VarI 1 :*: (NatI 5 :*: FacI (VarI 0))) :+: TerI (FacI (NatI 4)))
+testConstraint = testixI :<=: testixJ
 
---testIxJ = FacI 10 (VarI 1)
-
-testixJ = TerI $ NatI 112 :*: FacI (VarI 1)
-
-testConstraint = Constraint (testixI, testixJ)
-
-testConstraint' = Constraint (TerI $ NatI 148 :*: FacI (VarI 1), TerI $ VarI 2 :*: FacI (VarI 1))
+testConstraint' = 32 :+: [16 :*: (0, []), 12 :*: (2, [])] :<=: (56 :+: [36 :*: (0, []), 12 :*: (2, [3])])
 
 main :: IO ()
 main = do
   print [testConstraint, testConstraint']
-  print (Prelude.map normalize [testConstraint, testConstraint'])
-  print (transitiveClosure $ Set.fromList $ Prelude.map normalize [testConstraint, testConstraint'])
+  let newConstraint = testixI :<=: (112 :+: [36 :*: (0, []), 24 :*: (2, [3])])
+  print $ normalize newConstraint
+  let transclo = transitiveClosure $ Set.fromList $ Prelude.map normalize [testConstraint, testConstraint']
+  print $ transclo
+  print $ constraintsInclude transclo newConstraint
