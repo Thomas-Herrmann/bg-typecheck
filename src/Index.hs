@@ -2,11 +2,12 @@ module Index
   ( Index (..),
     Term (..),
     subIndex,
+    VarID,
   )
 where
 
-import GHC.Natural (Natural)
 import Data.List (intercalate)
+import GHC.Natural (Natural)
 
 type VarID = Int
 
@@ -25,14 +26,13 @@ instance Ord Term where
     case (i : is) `compare` (j : js) of
       LT -> LT
       GT -> GT
-      EQ -> n `compare` m 
+      EQ -> n `compare` m
 
 -- indices must be normalized prior
 subIndex :: Index -> Index -> Bool
 subIndex (n :+: ts) (m :+: ts') = n <= m && Prelude.foldr pairwiseSubTerm True (Prelude.zip ts ts')
   where
     pairwiseSubTerm (t, t') b = b && subTerm t t'
-
 
 subTerm :: Term -> Term -> Bool
 subTerm (n :*: (i, is)) (m :*: (j, js)) = n <= m && Prelude.foldr (\(k, l) b -> b && k == l) True (Prelude.zip (i : is) (j : js))
