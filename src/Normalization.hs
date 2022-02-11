@@ -1,47 +1,39 @@
 module Normalization
-  ( normalize,
+  ( makeConstraint,
+    normalize,
   )
 where
 
 import Constraint (Constraint (..))
+import Data.Bifunctor
 import Data.List (sort)
-import GHC.Natural (Natural)
-import Index (Index (..), Term (..))
+import Data.Map as Map
+import Data.MultiSet as MultiSet
+import Data.Set as Set
+import GHC.Natural (Natural, naturalToInteger)
+import Index (Index (..), NormalizedIndex, VarID)
 
+makeConstraint :: Index -> Index -> Constraint
+makeConstraint ixI ixJ = normalize $ normalizeIndex ixI :<=: normalizeIndex ixJ
 
--- index must be sorted prior
-reduceIndex :: Index -> Index
-reduceIndex (n :+: ((0 :*: _) : ts)) = reduceIndex $ n :+: ts
-reduceIndex (n :+: ((m :*: is) : (m' :*: js) : ts)) | is == js = reduceIndex $ n :+: (((m + m') :*: is) : ts)
-reduceIndex ixI = ixI
-
-
-sortIndex :: Index -> Index
-sortIndex (n :+: ts) = n :+: sort (Prelude.map sortCoefficients ts)
+expandIndex :: Index -> [(Integer, MultiSet VarID)]
+expandIndex (NatI n) = [(naturalToInteger n, MultiSet.empty)]
+expandIndex (VarI i) = [(1, MultiSet.singleton i)]
+expandIndex (ixI :+: ixJ) = expandIndex ixI ++ expandIndex ixJ
+expandIndex (ixI :-: ixJ) = expandIndex ixI ++ Prelude.map (Data.Bifunctor.first (* (-1))) (expandIndex ixJ)
+expandIndex (ixI :*: ixJ) = [(n * m, ims `MultiSet.union` ims') | (n, ims) <- ixI', (m, ims') <- ixJ']
   where
-    sortCoefficients (m :*: (i, is)) =
-      let
-        i' : is' = sort $ i : is
-      in
-        m :*: (i', is')
+    ixI' = expandIndex ixI
+    ixJ' = expandIndex ixJ
 
+normalizeIndex :: Index -> NormalizedIndex
+normalizeIndex = Prelude.foldr (\(n, ims) -> Map.insertWith (+) ims n) Map.empty . expandIndex
 
 normalize :: Constraint -> Constraint
-normalize (ixI :<=: ixJ) = ixI'' :<=: ixJ''
+normalize (f :<=: f') = Map.map (`div` divisor) f :<=: Map.map (`div` divisor) f'
   where
-    ixI' = (reduceIndex . sortIndex) ixI
-    ixJ' = (reduceIndex . sortIndex) ixJ
-    divisor = multiGCD $ factors ixI' ++ factors ixJ'
-    ixI'' = divideFactors divisor ixI'
-    ixJ'' = divideFactors divisor ixJ'
+    divisor = multiGCD $ Map.elems f ++ Map.elems f'
 
-factors :: Index -> [Natural]
-factors (n :+: ts) = n : Prelude.map (\(m :*: _) -> m) ts
-
-multiGCD :: [Natural] -> Natural
+multiGCD :: [Integer] -> Integer
 multiGCD [] = 1
-multiGCD [n] = n
-multiGCD (n : ns) = foldr gcd n ns
-
-divideFactors :: Natural -> Index -> Index
-divideFactors n (m :+: ts) = (m `div` n) :+: Prelude.map (\(m' :*: is) -> (m' `div` n) :*: is) ts
+multiGCD (n : ns) = Prelude.foldr gcd n ns

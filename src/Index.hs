@@ -1,38 +1,41 @@
 module Index
   ( Index (..),
-    Term (..),
+    NormalizedIndex,
     subIndex,
     VarID,
+    showNormalizedIndex,
   )
 where
 
 import Data.List (intercalate)
+import Data.Map as Map
+import Data.MultiSet as MultiSet
+import Data.Set as Set
 import GHC.Natural (Natural)
 
 type VarID = Int
 
-data Index = Natural :+: [Term] deriving (Eq, Ord)
+data Index = NatI Natural | VarI VarID | Index :+: Index | Index :-: Index | Index :*: Index deriving (Eq, Ord)
 
-data Term = Natural :*: (VarID, [VarID]) deriving (Eq)
+type NormalizedIndex = Map (MultiSet VarID) Integer
 
 instance Show Index where
-  show (n :+: ts) = show n ++ " + " ++ intercalate " + " (Prelude.map show ts)
+  show (NatI n) = show n
+  show (VarI i) = "i" ++ show i
+  show (ixI :+: ixJ) = "(" ++ show ixI ++ "+" ++ show ixJ ++ ")"
+  show (ixI :-: ixJ) = "(" ++ show ixI ++ "-" ++ show ixJ ++ ")"
+  show (ixI :*: ixJ) = show ixI ++ show ixJ
 
-instance Show Term where
-  show (n :*: (i, is)) = show n ++ "*i" ++ intercalate "*i" (Prelude.map show (i : is))
-
-instance Ord Term where
-  (n :*: (i, is)) `compare` (m :*: (j, js)) =
-    case (i : is) `compare` (j : js) of
-      LT -> LT
-      GT -> GT
-      EQ -> n `compare` m
-
--- indices must be normalized prior
-subIndex :: Index -> Index -> Bool
-subIndex (n :+: ts) (m :+: ts') = n <= m && Prelude.foldr pairwiseSubTerm True (Prelude.zip ts ts')
+subIndex :: NormalizedIndex -> NormalizedIndex -> Bool
+subIndex f f' = Prelude.foldr foldf True $ Map.keysSet f `Set.union` Map.keysSet f'
   where
-    pairwiseSubTerm (t, t') b = b && subTerm t t'
+    foldf ims b =
+      b
+        && case (Map.lookup ims f, Map.lookup ims f') of
+          (Just n, Just m) -> n <= m
+          (Just n, Nothing) -> n <= 0
+          (Nothing, Just m) -> m >= 0
+          _ -> False -- should not happen
 
-subTerm :: Term -> Term -> Bool
-subTerm (n :*: (i, is)) (m :*: (j, js)) = n <= m && Prelude.foldr (\(k, l) b -> b && k == l) True (Prelude.zip (i : is) (j : js))
+showNormalizedIndex :: NormalizedIndex -> String
+showNormalizedIndex f = intercalate " + " $ Prelude.map (\(ims, n) -> show n ++ Prelude.foldr (\i s -> "*i" ++ show i ++ s) "" ims) (Map.assocs f)
