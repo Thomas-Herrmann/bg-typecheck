@@ -16,18 +16,15 @@ import Index (Index (..), NormalizedIndex, VarID)
 makeConstraint :: Index -> Index -> Constraint
 makeConstraint ixI ixJ = normalize $ normalizeIndex ixI :<=: normalizeIndex ixJ
 
-expandIndex :: Index -> [(Integer, MultiSet VarID)]
-expandIndex (NatI n) = [(naturalToInteger n, MultiSet.empty)]
-expandIndex (VarI i) = [(1, MultiSet.singleton i)]
-expandIndex (ixI :+: ixJ) = expandIndex ixI ++ expandIndex ixJ
-expandIndex (ixI :-: ixJ) = expandIndex ixI ++ Prelude.map (Data.Bifunctor.first (* (-1))) (expandIndex ixJ)
-expandIndex (ixI :*: ixJ) = [(n * m, ims `MultiSet.union` ims') | (n, ims) <- ixI', (m, ims') <- ixJ']
-  where
-    ixI' = expandIndex ixI
-    ixJ' = expandIndex ixJ
-
 normalizeIndex :: Index -> NormalizedIndex
-normalizeIndex = Prelude.foldr (\(n, ims) -> Map.insertWith (+) ims n) Map.empty . expandIndex
+normalizeIndex (NatI n) = Map.singleton MultiSet.empty $ naturalToInteger n
+normalizeIndex (VarI i) = Map.singleton (MultiSet.singleton i) 1
+normalizeIndex (ixI :+: ixJ) = Map.unionWith (+) (normalizeIndex ixI) (normalizeIndex ixJ)
+normalizeIndex (ixI :-: ixJ) = Map.unionWith (-) (normalizeIndex ixI) (normalizeIndex ixJ)
+normalizeIndex (ixI :*: ixJ) = Map.fromList [(ims `MultiSet.union` ims', n * m) | (ims, n) <- Map.assocs f, (ims', m) <- Map.assocs f']
+  where
+    f = normalizeIndex ixI
+    f' = normalizeIndex ixJ
 
 normalize :: Constraint -> Constraint
 normalize (f :<=: f') = Map.map (`div` divisor) f :<=: Map.map (`div` divisor) f'
