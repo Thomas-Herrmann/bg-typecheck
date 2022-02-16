@@ -1,6 +1,9 @@
 module Index
   ( Index (..),
     NormalizedIndex,
+    indexCoeffs,
+    zeroIndex,
+    oneIndex,
     subIndex,
     VarID,
     showNormalizedIndex,
@@ -25,6 +28,15 @@ instance Show Index where
   show (ixI :+: ixJ) = "(" ++ show ixI ++ "+" ++ show ixJ ++ ")"
   show (ixI :-: ixJ) = "(" ++ show ixI ++ "-" ++ show ixJ ++ ")"
   show (ixI :*: ixJ) = show ixI ++ show ixJ
+
+indexCoeffs :: NormalizedIndex -> [Integer]
+indexCoeffs = Map.elems
+
+zeroIndex :: NormalizedIndex
+zeroIndex = Map.empty
+
+oneIndex :: NormalizedIndex
+oneIndex = Map.singleton MultiSet.empty 1
 
 subIndex :: NormalizedIndex -> NormalizedIndex -> Bool
 subIndex f f' = Prelude.foldr foldf True $ Map.keysSet f `Set.union` Map.keysSet f'
