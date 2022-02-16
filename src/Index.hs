@@ -4,6 +4,10 @@ module Index
     subIndex,
     VarID,
     showNormalizedIndex,
+    (.+.),
+    (.-.),
+    (.*.),
+    (./.),
   )
 where
 
@@ -36,6 +40,20 @@ subIndex f f' = Prelude.foldr foldf True $ Map.keysSet f `Set.union` Map.keysSet
           (Just n, Nothing) -> n <= 0
           (Nothing, Just m) -> m >= 0
           _ -> False -- should not happen
+
+
+(.+.) :: NormalizedIndex -> NormalizedIndex -> NormalizedIndex
+(.+.) = Map.unionWith (+)
+
+(.-.) :: NormalizedIndex -> NormalizedIndex -> NormalizedIndex
+(.-.) f1 f2 = Map.unionWith (+) f1 $ Map.map (* (-1)) f2
+
+(.*.) :: NormalizedIndex -> NormalizedIndex -> NormalizedIndex
+(.*.) f1 f2 = Map.fromListWith (+) [(ims `MultiSet.union` ims', n * m) | (ims, n) <- Map.assocs f1, (ims', m) <- Map.assocs f2]
+
+(./.) :: NormalizedIndex -> Integer -> NormalizedIndex
+(./.) f1 n = Map.map (`div` n) f1
+
 
 showNormalizedIndex :: NormalizedIndex -> String
 showNormalizedIndex f = intercalate " + " $ Prelude.map (\(ims, n) -> show n ++ Prelude.foldr (\i s -> "*i" ++ show i ++ s) "" ims) (Map.assocs f)
