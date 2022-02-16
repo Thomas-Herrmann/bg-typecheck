@@ -1,18 +1,33 @@
 module Constraint
   ( Constraint (..),
+    constraintCoeffs,
     transitiveClosure,
     subConstraint,
   )
 where
 
 import Data.Set as Set
-import Index (Index, NormalizedIndex, showNormalizedIndex, subIndex)
+import Index (Index, NormalizedIndex, indexCoeffs, showNormalizedIndex, subIndex)
 
 -- represents I <= J
-data Constraint = NormalizedIndex :<=: NormalizedIndex deriving (Eq, Ord)
+data Constraint
+  = NormalizedIndex :<=: NormalizedIndex
+  | NormalizedIndex :>=: NormalizedIndex
+  | NormalizedIndex :<: NormalizedIndex
+  | NormalizedIndex :>: NormalizedIndex
+  | NormalizedIndex :=: NormalizedIndex
+  deriving (Eq, Ord)
+
+data NormalizedConstraint = NormalizedConstraint NormalizedIndex
 
 instance Show Constraint where
   show (f :<=: f') = showNormalizedIndex f ++ " <= " ++ showNormalizedIndex f'
+
+constraintCoeffs (i :<=: j) = indexCoeffs i ++ indexCoeffs j
+constraintCoeffs (i :>=: j) = indexCoeffs i ++ indexCoeffs j
+constraintCoeffs (i :<: j) = indexCoeffs i ++ indexCoeffs j
+constraintCoeffs (i :>: j) = indexCoeffs i ++ indexCoeffs j
+constraintCoeffs (i :=: j) = indexCoeffs i ++ indexCoeffs j
 
 subConstraint :: Constraint -> Constraint -> Bool
 subConstraint (f1 :<=: f2) (f1' :<=: f2') = subIndex f1 f1' && subIndex f2' f2
