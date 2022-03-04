@@ -1,5 +1,6 @@
 module Constraint
   ( Constraint (..),
+    NormalizedConstraint (..),
     constraintCoeffs,
     transitiveClosure,
     subConstraint,
@@ -18,7 +19,7 @@ data Constraint
   | NormalizedIndex :=: NormalizedIndex
   deriving (Eq, Ord)
 
-data NormalizedConstraint = NormalizedConstraint NormalizedIndex
+newtype NormalizedConstraint = NormalizedConstraint NormalizedIndex deriving (Eq)
 
 instance Show Constraint where
   show (f :<=: f') = showNormalizedIndex f ++ " <= " ++ showNormalizedIndex f'

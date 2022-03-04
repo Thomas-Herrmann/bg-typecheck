@@ -1,6 +1,7 @@
 module Index
   ( Index (..),
     NormalizedIndex,
+    substitute,
     indexCoeffs,
     zeroIndex,
     oneIndex,
@@ -18,7 +19,7 @@ import Data.List (intercalate)
 import Data.Map as Map
 import Data.MultiSet as MultiSet
 import Data.Set as Set
-import GHC.Natural (Natural)
+import GHC.Natural (Natural, naturalToInteger)
 
 type VarID = Int
 
@@ -32,6 +33,11 @@ instance Show Index where
   show (ixI :+: ixJ) = "(" ++ show ixI ++ "+" ++ show ixJ ++ ")"
   show (ixI :-: ixJ) = "(" ++ show ixI ++ "-" ++ show ixJ ++ ")"
   show (ixI :*: ixJ) = show ixI ++ show ixJ
+
+substitute :: NormalizedIndex -> Map VarID Natural -> Maybe Integer
+substitute f subst = Map.foldrWithKey (\monomial coeff res -> instantiate monomial >>= (\prod -> res >>= (\sum -> Just (coeff * prod + sum)))) (Just 0) f
+  where
+    instantiate = MultiSet.fold (\i mProd -> Map.lookup i subst >>= (\n -> mProd >>= (\prod -> Just (naturalToInteger n * prod)))) $ Just 1
 
 indexCoeffs :: NormalizedIndex -> [Integer]
 indexCoeffs = Map.elems
@@ -53,7 +59,6 @@ subIndex f f' = Prelude.foldr foldf True $ Map.keysSet f `Set.union` Map.keysSet
           (Nothing, Just m) -> m >= 0
           _ -> False -- should not happen
 
-
 (.+.) :: NormalizedIndex -> NormalizedIndex -> NormalizedIndex
 (.+.) = Map.unionWith (+)
 
@@ -65,7 +70,6 @@ subIndex f f' = Prelude.foldr foldf True $ Map.keysSet f `Set.union` Map.keysSet
 
 (./.) :: NormalizedIndex -> Integer -> NormalizedIndex
 (./.) f1 n = Map.map (`div` n) f1
-
 
 showNormalizedIndex :: NormalizedIndex -> String
 showNormalizedIndex f = intercalate " + " $ Prelude.map (\(ims, n) -> show n ++ Prelude.foldr (\i s -> "*i" ++ show i ++ s) "" ims) (Map.assocs f)
