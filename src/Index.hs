@@ -19,7 +19,7 @@ import Data.List (intercalate)
 import Data.Map as Map
 import Data.MultiSet as MultiSet
 import Data.Set as Set
-import GHC.Natural (Natural, naturalToInteger)
+import GHC.Natural (Natural, naturalToInt)
 
 type VarID = Int
 
@@ -34,10 +34,11 @@ instance Show Index where
   show (ixI :-: ixJ) = "(" ++ show ixI ++ "-" ++ show ixJ ++ ")"
   show (ixI :*: ixJ) = show ixI ++ show ixJ
 
-substitute :: NormalizedIndex -> Map VarID Natural -> Maybe Integer
-substitute f subst = Map.foldrWithKey (\monomial coeff res -> instantiate monomial >>= (\prod -> res >>= (\sum -> Just (coeff * prod + sum)))) (Just 0) f
+-- todo: this should technically be integers!
+substitute :: NormalizedIndex -> Map VarID Float -> Maybe Float
+substitute f subst = Map.foldrWithKey (\monomial coeff res -> instantiate monomial >>= (\prod -> res >>= (\sum -> Just (fromIntegral coeff * prod + sum)))) (Just 0) f
   where
-    instantiate = MultiSet.fold (\i mProd -> Map.lookup i subst >>= (\n -> mProd >>= (\prod -> Just (naturalToInteger n * prod)))) $ Just 1
+    instantiate = MultiSet.fold (\i mProd -> Map.lookup i subst >>= (\n -> mProd >>= (\prod -> Just (n * prod)))) $ Just 1
 
 indexCoeffs :: NormalizedIndex -> [Integer]
 indexCoeffs = Map.elems

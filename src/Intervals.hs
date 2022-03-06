@@ -1,17 +1,20 @@
 module Intervals
-  (
+  ( checkJudgement,
   )
 where
 
 import Constraint (Constraint, NormalizedConstraint (..))
+import Data.Functor ((<&>))
+import Data.Map as Map
+import Data.MultiSet as MultiSet
 import Data.Set as Set
-import GHC.Natural (Natural)
+import Diagrams.Solve.Polynomial (quartForm)
 import Index (NormalizedIndex (..), VarID, substitute)
 
 data Interval
   = EmptyI
-  | PairI Natural Natural
-  | InfI Natural
+  | PairI Float Float
+  | InfI Float
   deriving (Eq)
 
 intersect :: Interval -> Interval -> Interval
@@ -66,10 +69,60 @@ containsIntervals (i1 : is1') (i2 : is2') =
     then containsIntervals (i1 : is1') is2'
     else containsIntervals is1' (i2 : is2')
 
-findIntervals :: VarID -> NormalizedConstraint -> [Interval]
-findIntervals i c = 
+findIntervals :: VarID -> NormalizedConstraint -> Maybe [Interval]
+findIntervals i (NormalizedConstraint f)
+  | invalidPolynomial = Nothing
+  | otherwise = do
+    roots <- nonnegativeRoots i f
+    case roots of
+      [] -> substitute f (Map.singleton i 0) >>= (\n -> return [InfI 0 | n < 0])
+      _ ->
+        let (lastRoot, intervals) = Prelude.foldr foldRoot (0, []) roots
+         in substitute f (Map.singleton i (lastRoot + 1)) >>= (\n -> return $ intervals ++ [InfI lastRoot | n < 0])
+  where
+    foldRoot high (low, intervals)
+      | ((low + high) / 2) <= 0 = (high, PairI low high : intervals)
+      | otherwise = (high, intervals)
+
+    joinIntervals [] = []
+    joinIntervals (EmptyI : intervals') = joinIntervals intervals'
+    joinIntervals (PairI low high : PairI low' high' : intervals') | high >= low' = joinIntervals $ PairI low high' : intervals'
+    joinIntervals (PairI low high : InfI low' : intervals') | high >= low' = [InfI low]
+    joinIntervals (InfI low : intervals') = [InfI low]
+    joinIntervals (interval : intervals') = interval : joinIntervals intervals'
+
+    invalidPolynomial =
+      Prelude.foldr (\ms b -> not b || (not (MultiSet.null ms) && MultiSet.distinctElems ms /= [i])) True $ Map.keys f
+
+nonnegativeRoots :: VarID -> NormalizedIndex -> Maybe [Float]
+nonnegativeRoots i f
+  | isConstant = Just []
+  | invalidPolynomial || tooHighDegree = Nothing
+  | otherwise = Just $ Prelude.filter (0 <=) roots
+  where
+    isConstant =
+      case Map.keys f of
+        [] -> True
+        [ms] -> Prelude.null $ MultiSet.elems ms
+        _ -> False
+
+    tooHighDegree =
+      Prelude.foldr ((||) . ((4 <) . MultiSet.size)) False (Map.keys f)
+
+    invalidPolynomial =
+      Prelude.foldr (\ms b -> not b || (not (MultiSet.null ms) && MultiSet.distinctElems ms /= [i])) True $ Map.keys f
+
+    coeff n =
+      case Map.lookup (MultiSet.fromList $ Prelude.take n [i, i ..]) f of
+        Just m -> fromIntegral m
+        _ -> 0
+
+    roots = quartForm (coeff 0) (coeff 1) (coeff 2) (coeff 3) (coeff 4)
 
 checkJudgement :: VarID -> Set NormalizedConstraint -> NormalizedConstraint -> Bool
-checkJudgement i phi c = containsIntervals (findIntervals i c) satisfiedIntervals
+checkJudgement i phi c =
+  case (satisfiedIntervals, findIntervals i c) of
+    (Just isGiven, Just isNew) -> containsIntervals isNew isGiven
+    _ -> False
   where
-    satisfiedIntervals = Set.foldr (\c' isRes -> intersectIntervals isRes $ findIntervals i c') [InfI 0] phi
+    satisfiedIntervals = Set.foldr (\c' misRes -> misRes >>= (\isRes -> findIntervals i c' <&> intersectIntervals isRes)) (Just [InfI 0]) phi

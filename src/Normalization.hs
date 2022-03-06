@@ -11,7 +11,7 @@ import Data.Map as Map
 import Data.MultiSet as MultiSet
 import Data.Set as Set
 import GHC.Natural (Natural, naturalToInteger)
-import Index (Index (..), NormalizedIndex, VarID, oneIndex, zeroIndex)
+import Index (Index (..), NormalizedIndex, VarID, oneIndex, zeroIndex, (.*.), (.+.), (.-.), (./.))
 
 makeConstraint :: Index -> Index -> Set Constraint
 makeConstraint ixI ixJ = normalize $ normalizeIndex ixI :<=: normalizeIndex ixJ

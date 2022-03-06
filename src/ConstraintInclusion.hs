@@ -1,15 +1,16 @@
 module ConstraintInclusion
-  ( constraintsInclude,
+  (
   )
 where
 
-import Constraint (transitiveClosure, Constraint, subConstraint)
-import Normalization (normalize)
+--constraintsInclude,
+
+import Constraint (Constraint, subConstraint, transitiveClosure)
 import Data.Set as Set
+import Normalization (normalize)
 
-
-constraintsInclude :: Set Constraint -> Constraint -> Bool
-constraintsInclude phi constraint = Set.foldr (\constraint'' b -> subConstraint constraint' constraint'' || b) False phi'
-  where
-    phi' = transitiveClosure $ Set.map normalize phi
-    constraint' = normalize constraint
+--constraintsInclude :: Set Constraint -> Constraint -> Bool
+--constraintsInclude phi constraint = Set.foldr (\constraint'' b -> subConstraint constraint' constraint'' || b) False phi'
+--  where
+--    phi' = transitiveClosure $ Set.map normalize phi
+--    constraint' = normalize constraint
