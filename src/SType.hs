@@ -1,14 +1,20 @@
 module SType
-( SType (..),
+  ( SType (..),
+    BType (..),
+    IOCapability (..),
+  )
+where
 
-) where
+import Data.Set
+import Index (NormalizedIndex (..), VarID)
 
+data IOCapability = InputC | OutputC
 
-data SType 
-  = NatST NormalizedIndex NormalizedIndex
-  | ChST NormalizedIndex [SType]
-  | IChST NormalizedIndex [SType]
-  | OChST NormalizedIndex [SType]
-  | ServST NormalizedIndex [VarID] NormalizedIndex [SType]
-  | IServST NormalizedIndex [VarID] NormalizedIndex [SType]
-  | OServST NormalizedIndex [VarID] NormalizedIndex [SType]
+data BType
+  = NatBT NormalizedIndex NormalizedIndex
+  | ListBT NormalizedIndex NormalizedIndex BType
+
+data SType
+  = BaseST BType
+  | ChST NormalizedIndex [SType] (Set IOCapability)
+  | ServST NormalizedIndex [VarID] NormalizedIndex [SType] (Set IOCapability)

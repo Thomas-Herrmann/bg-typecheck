@@ -14,21 +14,25 @@ module Index
     (.-.),
     (.*.),
     (./.),
+    Subst,
   )
 where
 
 import Data.List (intercalate)
+import Data.List as List
 import Data.Map as Map
 import Data.MultiSet as MultiSet
 import Data.Set as Set
 import GHC.Natural (Natural, naturalToInt)
-import Data.List as List
 
 type VarID = Int
+
+type Subst = Map VarID NormalizedIndex
 
 data Index = NatI Natural | VarI VarID | Index :+: Index | Index :-: Index | Index :*: Index deriving (Eq, Ord)
 
 type Monomial = MultiSet VarID
+
 type NormalizedIndex = Map Monomial Integer
 
 instance Show Index where
@@ -64,14 +68,14 @@ substituteVar ixI var ixJ = Map.foldrWithKey (\monomial coeff res -> monomialSub
 --      where
 --        varOccurences = List.map (\(var, ix) -> MultiSet.occur var monomial) substs
 --        strippedMonomial = List.foldr (\(var, ix) res -> MultiSet.deleteAll var res) monomial substs
---        newTerms = 
+--        newTerms =
 
-substituteVars :: NormalizedIndex -> Map VarID NormalizedIndex -> NormalizedIndex
+substituteVars :: NormalizedIndex -> Subst -> NormalizedIndex
 substituteVars ixI subst = Prelude.foldr ((.+.) . replace) Map.empty $ Map.assocs ixI
   where
     replace (ms, n) =
       let (joint, disjoint) = MultiSet.partition (`Map.member` subst) ms
-      in MultiSet.fold ((.*.) . (subst !)) (Map.singleton disjoint n) joint
+       in MultiSet.fold ((.*.) . (subst !)) (Map.singleton disjoint n) joint
 
 indexCoeffs :: NormalizedIndex -> [Integer]
 indexCoeffs = Map.elems
