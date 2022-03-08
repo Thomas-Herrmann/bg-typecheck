@@ -9,7 +9,7 @@ import Data.Map as Map
 import Data.MultiSet as MultiSet
 import Data.Set as Set
 import Diagrams.Solve.Polynomial (quartForm)
-import Index (NormalizedIndex (..), VarID, substitute)
+import Index (NormalizedIndex (..), VarID, evaluate)
 
 data Interval
   = EmptyI
@@ -75,10 +75,10 @@ findIntervals i (NormalizedConstraint f)
   | otherwise = do
     roots <- nonnegativeRoots i f
     case roots of
-      [] -> substitute f (Map.singleton i 0) >>= (\n -> return [InfI 0 | n < 0])
+      [] -> evaluate f (Map.singleton i 0) >>= (\n -> return [InfI 0 | n < 0])
       _ ->
         let (lastRoot, intervals) = Prelude.foldr foldRoot (0, []) roots
-         in substitute f (Map.singleton i (lastRoot + 1)) >>= (\n -> return $ intervals ++ [InfI lastRoot | n < 0])
+         in evaluate f (Map.singleton i (lastRoot + 1)) >>= (\n -> return $ intervals ++ [InfI lastRoot | n < 0])
   where
     foldRoot high (low, intervals)
       | ((low + high) / 2) <= 0 = (high, PairI low high : intervals)
