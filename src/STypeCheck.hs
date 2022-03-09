@@ -31,15 +31,8 @@ advance vphi phi ixI (ServST ixJ is k ts sigma)
   | otherwise = Just $ ServST (ixJ .-. ixI) is k ts (sigma `Set.intersection` Set.singleton OutputC)
 advance _ _ _ _ = Nothing
 
---advanceContext :: Set VarID -> Set NormalizedConstraint -> NormalizedIndex -> Map Var SType -> Map Var SType
+advanceContext :: Set VarID -> Set NormalizedConstraint -> NormalizedIndex -> Map Var SType -> Maybe (Map Var SType)
 advanceContext vphi phi ix g = sequence (Map.map (advance vphi phi ix) g)
---advanceContext vphi phi ix gam = Map.foldr (\e res -> e >>= (\e' -> res >>= (Just . Map.union e'))) (Just Map.empty) (Map.map (advance vphi phi) gam)
---  where
---    foldf e res = do
---      e' <- e
---      Map.union e' <$> res
-
---checkProc vphi phi (Map.map (advance phi oneIndex) gamma) p >>= (\k -> Just $ k .+. oneIndex)
 
 defaultBaseType = NatBT zeroIndex zeroIndex
 
@@ -141,8 +134,8 @@ checkProc _ _ _ NilP = Just zeroIndex
 --
 -- (S-tick)
 checkProc vphi phi gamma (TickP p) = do
-  phiA <- advance phi oneIndex
-  k <- checkProc vphi phi (Map.map (advance phi oneIndex) gamma) p
+  gammaA <- advanceContext vphi phi oneIndex gamma
+  k <- checkProc vphi phi gammaA p
   return $ k .+. oneIndex
 --
 -- (S-nu)
@@ -160,5 +153,3 @@ checkProc vphi phi gamma (InputP a vs p) | hasInputCapability a gamma = checkPro
 -- (S-oserv)
 
 checkProc _ _ _ _ = Nothing
-
--- advance :: Set VarID -> Set NormalizedConstraint -> NormalizedIndex -> SType -> Maybe SType
