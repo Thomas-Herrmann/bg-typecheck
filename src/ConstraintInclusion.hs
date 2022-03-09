@@ -5,9 +5,9 @@ where
 
 --constraintsInclude,
 
-import Constraint (Constraint, subConstraint, transitiveClosure)
+import Constraint (Constraint)
 import Data.Set as Set
-import Normalization (normalize)
+import Normalization (normalizeIndex)
 
 --constraintsInclude :: Set Constraint -> Constraint -> Bool
 --constraintsInclude phi constraint = Set.foldr (\constraint'' b -> subConstraint constraint' constraint'' || b) False phi'

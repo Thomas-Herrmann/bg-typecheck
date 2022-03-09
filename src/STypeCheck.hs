@@ -73,7 +73,8 @@ isSubType vphi phi (ServST ixI is ixK ts sigma) (ServST ixJ js ixK' ts' sigma')
   -- (SS-sinvar)
   | ixI == ixJ && is == js && sigma == sigma' == inOutCapa = 
     isSubType vphi' phi ts ts' && 
-    isSubType vphi' phi ts' ts && 
+    length ts == length ts' && 
+    Prelude.foldr (\(t', t) -> isSubType vphi' phi t' t) True (Prelude.zip ts' ts) && 
     checkJudgement vphi' phi (NormalizedConstraint (ixK .-. ixK')) && 
     checkJudgement vphi' phi (NormalizedConstraint (ixK' .-. ixK))
   
