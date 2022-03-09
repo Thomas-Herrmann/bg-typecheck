@@ -1,6 +1,7 @@
 module Normalization
   ( makeConstraint,
     normalize,
+    normalizeIndex,
   )
 where
 

@@ -10,7 +10,7 @@ import Index (NormalizedIndex, VarID, equalsConstant, evaluate, oneIndex, zeroIn
 import Intervals (checkJudgement)
 import Normalization (normalize, normalizeIndex)
 import PiCalculus (Exp (..), Proc (..), Var)
-import SType (BType (..), SType (..))
+import SType (BType (..), IOCapability (..), SType (..))
 
 type Context = Map Var SType
 
@@ -29,17 +29,24 @@ advance vphi phi ixI (ChST ixJ ts sigma) | checkJudgement vphi phi (NormalizedCo
 advance vphi phi ixI (ServST ixJ is k ts sigma)
   | checkJudgement vphi phi (NormalizedConstraint (ixI .-. ixJ)) = Just $ ServST (ixJ .-. ixI) is k ts sigma
   | otherwise = Just $ ServST (ixJ .-. ixI) is k ts (sigma `Set.intersection` Set.singleton OutputC)
-advance _ _ _ = Nothing
+advance _ _ _ _ = Nothing
+
+--advanceContext :: Set VarID -> Set NormalizedConstraint -> NormalizedIndex -> Map Var SType -> Map Var SType
+advanceContext vphi phi ix g = sequence (Map.map (advance vphi phi ix) g)
+--advanceContext vphi phi ix gam = Map.foldr (\e res -> e >>= (\e' -> res >>= (Just . Map.union e'))) (Just Map.empty) (Map.map (advance vphi phi) gam)
+--  where
+--    foldf e res = do
+--      e' <- e
+--      Map.union e' <$> res
+
+--checkProc vphi phi (Map.map (advance phi oneIndex) gamma) p >>= (\k -> Just $ k .+. oneIndex)
 
 defaultBaseType = NatBT zeroIndex zeroIndex
-
-isSubType :: Set VarID -> Set NormalizedConstraint -> SType -> SType -> Bool
-isSubType _ _ _ _ = False
 
 ready :: Set VarID -> Set NormalizedConstraint -> Context -> Context
 ready vphi phi = Map.foldrWithKey filterMap Map.empty
   where
-    filterMap v t@(BaseST _) = Map.insert v t
+    filterMap v t@(BaseST _) gamma = Map.insert v t gamma
     filterMap v (ServST ixI is k ts sigma) gamma | checkJudgement vphi phi (NormalizedConstraint ixI) = Map.insert v (ServST ixI is k ts (sigma `Set.intersection` Set.singleton OutputC)) gamma
     filterMap _ _ gamma = gamma
 
@@ -55,45 +62,48 @@ isSubBaseType vphi phi (ListBT ixI ixJ bt) (ListBT ixI' ixJ' bt') =
     && isSubBaseType vphi phi bt bt'
 isSubBaseType _ _ _ _ = False
 
+isSubTypeList :: Set VarID -> Set NormalizedConstraint -> [SType] -> [SType] -> Bool
+isSubTypeList vphi phi ts ts' =
+  length ts == length ts'
+    && Prelude.foldr (\(t', t) b -> b && isSubType vphi phi t' t) True (Prelude.zip ts' ts)
+
 isSubType :: Set VarID -> Set NormalizedConstraint -> SType -> SType -> Bool
 isSubType vphi phi (ServST ixI is ixK ts sigma) (ServST ixJ js ixK' ts' sigma')
   -- (SS-sinvar)
-  | ixI == ixJ && is == js && sigma == sigma' == inOutCapa =
-    isSubType vphi' phi ts ts'
-      && isSubType vphi' phi ts' ts
+  | ixI == ixJ && is == js && sigma == sigma' && sigma' == inOutCapa =
+    isSubTypeList vphi' phi ts ts'
+      && isSubTypeList vphi' phi ts' ts
       && checkJudgement vphi' phi (NormalizedConstraint (ixK .-. ixK'))
       && checkJudgement vphi' phi (NormalizedConstraint (ixK' .-. ixK))
   -- (SS-scovar)
-  | ixI == ixJ && is == js && sigma == sigma' == inCapa =
-    isSubType vphi' phi ts ts'
+  | ixI == ixJ && is == js && sigma == sigma' && sigma' == inCapa =
+    isSubTypeList vphi' phi ts ts'
       && checkJudgement vphi' phi (NormalizedConstraint (ixK' .-. ixK))
   -- (SS-scontra)
-  | ixI == ixJ && is == js && sigma == sigma' == outCapa =
-    isSubType vphi' phi ts' ts
+  | ixI == ixJ && is == js && sigma == sigma' && sigma' == outCapa =
+    isSubTypeList vphi' phi ts' ts
       && checkJudgement vphi' phi (NormalizedConstraint (ixK .-. ixK'))
   -- (SS-srelax)
   | ixI == ixJ && is == js =
     (sigma' `isSubsetOf` sigma)
       && isSubType vphi phi (ServST ixI is ixK ts sigma') (ServST ixJ js ixK' ts' sigma')
   where
-    vphi' = joinIndexVariables vphi $ Set.fromList ixI
+    vphi' = joinIndexVariables vphi $ Set.fromList is
 isSubType vphi phi (ChST ixI ts sigma) (ChST ixJ ts' sigma')
   -- (SS-cinvar)
-  | ixI == ixJ && sigma == sigma' == inOutCapa =
-    isSubType vphi' phi ts ts'
-      && isSubType vphi' phi ts' ts
+  | ixI == ixJ && sigma == sigma' && sigma' == inOutCapa =
+    isSubTypeList vphi phi ts ts'
+      && isSubTypeList vphi phi ts' ts
   -- (SS-ccovar)
-  | ixI == ixJ && sigma == sigma' == inCapa =
-    isSubType vphi' phi ts ts'
+  | ixI == ixJ && sigma == sigma' && sigma' == inCapa =
+    isSubTypeList vphi phi ts ts'
   -- (SS-ccontra)
-  | ixI == ixJ && sigma == sigma' == outCapa =
-    isSubType vphi' phi ts' ts
+  | ixI == ixJ && sigma == sigma' && sigma' == outCapa =
+    isSubTypeList vphi phi ts' ts
   -- (SS-crelax)
   | ixI == ixJ =
     (sigma' `isSubsetOf` sigma)
       && isSubType vphi phi (ChST ixI ts sigma') (ChST ixJ ts' sigma')
-  where
-    vphi' = joinIndexVariables vphi $ Set.fromList ixI
 isSubType _ _ _ _ = False
 
 checkExp :: Set VarID -> Set NormalizedConstraint -> Map Var SType -> Exp -> Maybe SType
@@ -126,9 +136,29 @@ checkExp vphi phi gamma (ListE (e : e')) = do
 
 -- TODO: remember (S-subtype) !!!
 checkProc :: Set VarID -> Set NormalizedConstraint -> Map Var SType -> Proc -> Maybe NormalizedIndex
+-- (S-zero)
 checkProc _ _ _ NilP = Just zeroIndex
-checkProc vphi phi gamma (TickP p) = checkProc vphi phi (Map.map (advance phi oneIndex) gamma) p >>= (\k -> Just $ k .+. oneIndex)
-checkProc vphi phi gamma (ResP v t p) = checkProc vphi phi (Map.insert v t gamma) p
+--
+-- (S-tick)
+checkProc vphi phi gamma (TickP p) = do
+  phiA <- advance phi oneIndex
+  k <- checkProc vphi phi (Map.map (advance phi oneIndex) gamma) p
+  return $ k .+. oneIndex
+--
+-- (S-nu)
+checkProc vphi phi gamma (RestrictP v t p) = checkProc vphi phi (Map.insert v t gamma) p
+--
+-- (S-ich)
 checkProc vphi phi gamma (InputP a vs p) | hasInputCapability a gamma = checkProc vphi phi (Map.map (advance phi ixI) gamma) p >>= (\k -> Just $ k .+. ixI)
   where
     ixI = time a gamma
+-- (S-och)
+-- (S-Xmatch-X)
+-- (S-par-1)
+-- (S-par-2)
+-- (S-iserv)
+-- (S-oserv)
+
+checkProc _ _ _ _ = Nothing
+
+-- advance :: Set VarID -> Set NormalizedConstraint -> NormalizedIndex -> SType -> Maybe SType
