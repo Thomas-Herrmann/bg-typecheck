@@ -1,6 +1,7 @@
 module Index
   ( Index (..),
     NormalizedIndex,
+    equalsConstant,
     evaluate,
     substituteVar,
     substituteVars,
@@ -41,6 +42,8 @@ instance Show Index where
   show (ixI :+: ixJ) = "(" ++ show ixI ++ "+" ++ show ixJ ++ ")"
   show (ixI :-: ixJ) = "(" ++ show ixI ++ "-" ++ show ixJ ++ ")"
   show (ixI :*: ixJ) = show ixI ++ show ixJ
+
+equalsConstant ix c = Map.size ix == 1 && Map.lookup MultiSet.empty ix == Just c
 
 -- todo: this should technically be integers!
 evaluate :: NormalizedIndex -> Map VarID Float -> Maybe Float

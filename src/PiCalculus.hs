@@ -13,6 +13,7 @@ type Var = String
 data Exp
   = ZeroE
   | SuccE Exp
+  | ListE [Exp]
   | VarE Var
 
 data Proc

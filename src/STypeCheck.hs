@@ -3,39 +3,61 @@ module STypeCheck
   )
 where
 
-import Constraint (NormalizedConstraint (..), Constraint (..))
-import Normalization (normalize, normalizeIndex)
-import Index (NormalizedIndex, VarID, zeroIndex, oneIndex, (.+.), (.-.), (.*.), (./.))
+import Constraint (Constraint (..), NormalizedConstraint (..))
 import ConstraintInclusion (constraintsContained)
-import PiCalculus (Var, Exp(..), Proc(..))
-import SType (SType (..))
-import Data.Set as Set
 import Data.Map as Map
-
+import Data.Set as Set
+import Index (NormalizedIndex, VarID, equalsConstant, evaluate, oneIndex, zeroIndex, (.*.), (.+.), (.-.), (./.))
+import Normalization (normalize, normalizeIndex)
+import PiCalculus (Exp (..), Proc (..), Var)
+import SType (BType (..), SType (..))
 
 -- note that we use meta-variables I,J,K,L for normalized indices in this file
-
 
 advance :: Set NormalizedConstraint -> NormalizedIndex -> SType -> Maybe SType
 advance _ _ nat@(NatST _ _) = Just nat
 advance phi ixI (ChST ixJ ts) | constraintsContained phi (normalize $ ixJ :>=: ixI) = Just $ ChST (ixJ .-. ixI) ts
 advance phi ixI (IChST ixJ ts) | constraintsContained phi (normalize $ ixJ :>=: ixI) = Just $ IChST (ixJ .-. ixI) ts
 advance phi ixI (OChST ixJ ts) | constraintsContained phi (normalize $ ixJ :>=: ixI) = Just $ OChST (ixJ .-. ixI) ts
-advance phi ixI ServST ixJ is ixK ts | constraintsContained phi (normalize $ ixJ :>=: ixI) = Just $ ServST (ixJ .-. ixI) is ixK ts
-                                     | otherwise = Just $ OServST (ixJ .-. ixI) is ixK ts
+advance phi ixI ServST ixJ is ixK ts
+  | constraintsContained phi (normalize $ ixJ :>=: ixI) = Just $ ServST (ixJ .-. ixI) is ixK ts
+  | otherwise = Just $ OServST (ixJ .-. ixI) is ixK ts
 advance phi ixI IServST ixJ is ixK ts | constraintsContained phi (normalize $ ixJ :>=: ixI) = Just $ IServST (ixJ .-. ixI) is ixK ts
-advance phi ixI OServST ixJ is ixK ts = Just $ OServST (ixJ .-. ixI) is ixK ts                                     
+advance phi ixI OServST ixJ is ixK ts = Just $ OServST (ixJ .-. ixI) is ixK ts
 advance _ _ _ = Nothing
 
+defaultBaseType = NatBT zeroIndex zeroIndex
+
+isSubType :: Set VarID -> Set NormalizedConstraint -> SType -> SType -> Bool
+isSubType _ _ _ _ = False
 
 checkExp :: Set VarID -> Set NormalizedConstraint -> Map Var SType -> Exp -> Maybe SType
-checkExp _ _ _ ZeroE = Just $ NatST zeroIndex zeroIndex
-checkExp vphi phi gamma (SuccE e) =
-  case checkExp vphi phi gamma e of
-    Just (NatST ixI ixJ) -> Just $ NatST (ixI .+. oneIndex) (IxJ .+. oneIndex)
-    _ -> Nothing
+-- (S-ZERO)
+checkExp _ _ _ ZeroE = Just $ BaseST (NatBT zeroIndex zeroIndex)
+--
+-- (S-SUCC)
+checkExp vphi phi gamma (SuccE e) = do
+  (BaseST (NatBT ixI ixJ)) <- checkExp vphi phi gamma e
+  return $ BaseST (NatBT (ixI .+. oneIndex) (ixJ .+. oneIndex))
+--
+-- (S-VAR)
 checkExp _ _ gamma (VarE v) = Map.lookup v gamma
-checkExp _ _ _ _ = Nothing -- TODO: remember (S-sub) !!!
+--
+-- (S-EMPTY)
+checkExp _ _ _ (ListE []) = Just $ BaseST (ListBT zeroIndex zeroIndex defaultBaseType)
+--
+-- (S-CONS-1) + (S-CONS-2)
+checkExp vphi phi gamma (ListE (e : e')) = do
+  (BaseST b) <- checkExp vphi phi gamma e
+  (BaseST (ListBT ixI ixJ b')) <- checkExp vphi phi gamma (ListE e')
+  if equalsConstant ixI 1 && equalsConstant ixJ 1
+    then -- (S-CONS-2)
+      return $ BaseST (ListBT oneIndex oneIndex b)
+    else -- (S-CONS-1)
+
+      if isSubType vphi phi (BaseST b') (BaseST b)
+        then return $ BaseST (ListBT (ixI .+. oneIndex) (ixJ .+. oneIndex) b)
+        else Nothing
 
 -- TODO: remember (S-subtype) !!!
 checkProc :: Set VarID -> Set NormalizedConstraint -> Map Var SType -> Proc -> Maybe NormalizedIndex
