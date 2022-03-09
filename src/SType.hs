@@ -8,7 +8,7 @@ where
 import Data.Set
 import Index (NormalizedIndex (..), VarID)
 
-data IOCapability = InputC | OutputC
+data IOCapability = InputC | OutputC deriving (Eq)
 
 data BType
   = NatBT NormalizedIndex NormalizedIndex

@@ -119,10 +119,15 @@ nonnegativeRoots i f
 
     roots = quartForm (coeff 0) (coeff 1) (coeff 2) (coeff 3) (coeff 4)
 
-checkJudgement :: VarID -> Set NormalizedConstraint -> NormalizedConstraint -> Bool
-checkJudgement i phi c =
-  case (satisfiedIntervals, findIntervals i c) of
-    (Just isGiven, Just isNew) -> containsIntervals isNew isGiven
+checkJudgement :: Set VarID -> Set NormalizedConstraint -> NormalizedConstraint -> Bool
+checkJudgement vphi phi c =
+  case Set.toList vphi of
+    [i] ->
+      let
+        phi' = Set.filter (\(NormalizedConstraint ixI) -> Map.foldrWithKey (\ms _ b -> b || MultiSet.member i ms) False ixI) phi
+        satisfiedIntervals = Set.foldr (\c' misRes -> misRes >>= (\isRes -> findIntervals i c' <&> intersectIntervals isRes)) (Just [InfI 0]) phi'
+      in
+        case (satisfiedIntervals, findIntervals i c) of
+          (Just isGiven, Just isNew) -> containsIntervals isNew isGiven
+          _ -> False
     _ -> False
-  where
-    satisfiedIntervals = Set.foldr (\c' misRes -> misRes >>= (\isRes -> findIntervals i c' <&> intersectIntervals isRes)) (Just [InfI 0]) phi
