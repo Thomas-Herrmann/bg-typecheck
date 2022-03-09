@@ -143,7 +143,7 @@ checkExp vphi phi gamma (ListE (e : e')) = do
       return $ BaseST (ListBT oneIndex oneIndex b)
     else -- (S-CONS-1)
 
-      if isSubType vphi phi (BaseST b') (BaseST b)
+      if isSubBaseType vphi phi b' b
         then return $ BaseST (ListBT (ixI .+. oneIndex) (ixJ .+. oneIndex) b)
         else Nothing
 
