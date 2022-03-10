@@ -8,7 +8,7 @@ import Data.Map as Map
 import Data.Set as Set
 import Index (NormalizedIndex, VarID, equalsConstant, evaluate, oneIndex, zeroIndex, (.*.), (.+.), (.-.), (./.))
 import Intervals (checkJudgement)
-import Normalization (normalize, normalizeIndex)
+import Normalization (normalizeConstraint, normalizeIndex)
 import PiCalculus (Exp (..), Proc (..), Var)
 import SType (BType (..), IOCapability (..), SType (..))
 
@@ -19,6 +19,9 @@ inOutCapa = Set.fromList [InputC, OutputC]
 inCapa = Set.singleton InputC
 
 outCapa = Set.singleton OutputC
+
+checkJudgements :: Set VarID -> Set NormalizedConstraint -> Set NormalizedConstraint -> Bool
+checkJudgements vphi phi = Prelude.foldr (\c res -> res && checkJudgement  vphi phi c) True
 
 joinIndexVariables :: Set VarID -> Set VarID -> Set VarID
 joinIndexVariables _ vphi = vphi -- for the univariate implementation (union for the multivariate case)
@@ -31,7 +34,7 @@ advance vphi phi ixI (ServST ixJ is k ts sigma)
   | otherwise = Just $ ServST (ixJ .-. ixI) is k ts (sigma `Set.intersection` Set.singleton OutputC)
 advance _ _ _ _ = Nothing
 
-advanceContext :: Set VarID -> Set NormalizedConstraint -> NormalizedIndex -> Map Var SType -> Maybe (Map Var SType)
+advanceContext :: Set VarID -> Set NormalizedConstraint -> NormalizedIndex -> Context -> Maybe Context
 advanceContext vphi phi ix g = sequence (Map.map (advance vphi phi ix) g)
 
 defaultBaseType = NatBT zeroIndex zeroIndex
@@ -40,7 +43,9 @@ ready :: Set VarID -> Set NormalizedConstraint -> Context -> Context
 ready vphi phi = Map.foldrWithKey filterMap Map.empty
   where
     filterMap v t@(BaseST _) gamma = Map.insert v t gamma
-    filterMap v (ServST ixI is k ts sigma) gamma | checkJudgement vphi phi (NormalizedConstraint ixI) = Map.insert v (ServST ixI is k ts (sigma `Set.intersection` Set.singleton OutputC)) gamma
+    filterMap v (ServST ixI is k ts sigma) gamma
+      | checkJudgement vphi phi (NormalizedConstraint ixI) =
+        Map.insert v (ServST ixI is k ts (sigma `Set.intersection` Set.singleton OutputC)) gamma
     filterMap _ _ gamma = gamma
 
 isSubBaseType :: Set VarID -> Set NormalizedConstraint -> BType -> BType -> Bool
@@ -99,6 +104,10 @@ isSubType vphi phi (ChST ixI ts sigma) (ChST ixJ ts' sigma')
       && isSubType vphi phi (ChST ixI ts sigma') (ChST ixJ ts' sigma')
 isSubType _ _ _ _ = False
 
+-- Pair-wise sub-type checking
+isSubTypes :: Set VarID -> Set NormalizedConstraint -> [SType] -> [SType] -> Bool
+isSubTypes vphi phi t1s t2s = Prelude.foldr (\(t1, t2) res -> res && isSubType vphi phi t1 t2) True (zip t1s t2s)
+
 checkExp :: Set VarID -> Set NormalizedConstraint -> Map Var SType -> Exp -> Maybe SType
 -- (S-ZERO)
 checkExp _ _ _ ZeroE = Just $ BaseST (NatBT zeroIndex zeroIndex)
@@ -127,6 +136,20 @@ checkExp vphi phi gamma (ListE (e : e')) = do
         then return $ BaseST (ListBT (ixI .+. oneIndex) (ixJ .+. oneIndex) b)
         else Nothing
 
+checkExps :: Set VarID -> Set NormalizedConstraint -> Map Var SType -> [Exp] -> Maybe [SType]
+checkExps vphi phi gamma = mapM (checkExp vphi phi gamma)
+
+hasCapability :: IOCapability -> Var -> Context -> Bool
+hasCapability c a gamma =
+  case Map.lookup a gamma of
+    Just (ChST _ _ cap) | Set.member c cap -> True
+    Just (ServST _ _ _ _ cap) | Set.member c cap -> True
+    _ -> False
+
+hasInputCapability = hasCapability InputC
+
+hasOutputCapability = hasCapability OutputC
+
 -- TODO: remember (S-subtype) !!!
 checkProc :: Set VarID -> Set NormalizedConstraint -> Map Var SType -> Proc -> Maybe NormalizedIndex
 -- (S-zero)
@@ -142,14 +165,37 @@ checkProc vphi phi gamma (TickP p) = do
 checkProc vphi phi gamma (RestrictP v t p) = checkProc vphi phi (Map.insert v t gamma) p
 --
 -- (S-ich)
-checkProc vphi phi gamma (InputP a vs p) | hasInputCapability a gamma = checkProc vphi phi (Map.map (advance phi ixI) gamma) p >>= (\k -> Just $ k .+. ixI)
-  where
-    ixI = time a gamma
+checkProc vphi phi gamma (InputP a vs p) | hasInputCapability a gamma = do
+  (ChST ixI ts cap) <- Map.lookup a gamma
+  gammaA <- advanceContext vphi phi ixI gamma
+  let gammaA' = gammaA `Map.union` Map.singleton a (ChST zeroIndex ts cap) `Map.union` Map.fromList (zip vs ts)
+  k <- checkProc vphi phi gammaA' p
+  return $ k .+. ixI
+--
 -- (S-och)
+checkProc vphi phi gamma (OutputP a es subst) | hasOutputCapability a gamma = do
+  (ChST ixI ts cap) <- Map.lookup a gamma
+  gammaA <- advanceContext vphi phi ixI gamma
+  ts' <- checkExps vphi phi gamma es
+  if isSubTypes vphi phi ts ts'
+    then return ixI
+    else Nothing
+--
+-- (S-iserv)
+checkProc vphi phi gamma (RepInputP a vs p) | hasInputCapability a gamma = do
+  (ServST ixI is k ts cap) <- Map.lookup a gamma
+  gammaA <- advanceContext vphi phi ixI gamma
+  let gammaAR = ready vphi phi gammaA
+  let gammaAR' = gammaAR `Map.union` Map.singleton a (ServST zeroIndex is k ts outCapa) `Map.union` Map.fromList (zip vs ts)
+  k' <- checkProc vphi phi gammaAR' p
+  if checkJudgements (vphi `Set.union` Set.fromList is) phi (normalizeConstraint (k' :<=: k))
+    then return ixI
+    else Nothing
+
+-- (S-oserv)
+--
 -- (S-Xmatch-X)
 -- (S-par-1)
 -- (S-par-2)
--- (S-iserv)
--- (S-oserv)
 
 checkProc _ _ _ _ = Nothing
