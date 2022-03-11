@@ -202,7 +202,7 @@ checkProc vphi phi gamma (RepInputP a vs p) | hasInputCapability a gamma = do
   let gammaAR = ready vphi phi gammaA
   let gammaAR' = gammaAR `Map.union` Map.singleton a (ServST zeroIndex is k ts outCapa) `Map.union` Map.fromList (zip vs ts)
   k' <- checkProc vphi phi gammaAR' p
-  if checkJudgements (vphi `Set.union` Set.fromList is) phi (normalizeConstraint (k' :<=: k))
+  if checkJudgements (vphi `joinIndexVariables` Set.fromList is) phi (normalizeConstraint (k' :<=: k))
     then return ixI
     else Nothing
 --
