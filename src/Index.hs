@@ -9,6 +9,8 @@ module Index
     zeroIndex,
     oneIndex,
     subIndex,
+    nIndex,
+    monIndex,
     VarID,
     showNormalizedIndex,
     (.+.),
@@ -16,6 +18,8 @@ module Index
     (.*.),
     (./.),
     Subst,
+    Monomial,
+    indexMonomials,
   )
 where
 
@@ -60,19 +64,6 @@ substituteVar ixI var ixJ = Map.foldrWithKey (\monomial coeff res -> monomialSub
         varOccurences = MultiSet.occur var monomial
         strippedMonomial = MultiSet.deleteAll var monomial
 
---substituteVars :: NormalizedIndex -> [(VarID, NormalizedIndex)] -> NormalizedIndex
---substituteVars = List.foldr (\(var, ixJ) res -> substituteVar res var ixJ)
-
---substituteVar' :: NormalizedIndex -> [(VarID, NormalizedIndex)] -> NormalizedIndex
---substituteVar' ixI substs = Map.foldrWithKey (\monomial coeff res -> monomialSubstitute monomial coeff substs .+. res) zeroIndex ixI
---  where
---    monomialSubstitute :: Monomial -> Integer -> VarID -> NormalizedIndex -> NormalizedIndex
---    monomialSubstitute monomial coeff substs = List.foldr (.*.) (Map.singleton strippedMonomial coeff) (List.concat (List.replicate varOccurences [ixJ]))
---      where
---        varOccurences = List.map (\(var, ix) -> MultiSet.occur var monomial) substs
---        strippedMonomial = List.foldr (\(var, ix) res -> MultiSet.deleteAll var res) monomial substs
---        newTerms =
-
 substituteVars :: NormalizedIndex -> Subst -> NormalizedIndex
 substituteVars ixI subst = Prelude.foldr ((.+.) . replace) Map.empty $ Map.assocs ixI
   where
@@ -83,11 +74,20 @@ substituteVars ixI subst = Prelude.foldr ((.+.) . replace) Map.empty $ Map.assoc
 indexCoeffs :: NormalizedIndex -> [Integer]
 indexCoeffs = Map.elems
 
+indexMonomials :: NormalizedIndex -> Set Monomial
+indexMonomials = Map.keysSet
+
 zeroIndex :: NormalizedIndex
 zeroIndex = Map.empty
 
 oneIndex :: NormalizedIndex
 oneIndex = Map.singleton MultiSet.empty 1
+
+nIndex :: Integer -> NormalizedIndex
+nIndex = Map.singleton MultiSet.empty
+
+monIndex :: [VarID] -> Integer -> NormalizedIndex
+monIndex mon = Map.singleton (MultiSet.fromList mon)
 
 subIndex :: NormalizedIndex -> NormalizedIndex -> Bool
 subIndex f f' = Prelude.foldr foldf True $ Map.keysSet f `Set.union` Map.keysSet f'
