@@ -21,7 +21,7 @@ data Proc
   | TickP Proc
   | Proc :|: Proc
   | InputP Var [Var] Proc
-  | OutputP Var [Exp] Subst
+  | OutputP Var [Exp]
   | RepInputP Var [Var] Proc
   | RestrictP Var SType Proc
   | MatchNatP Exp Proc Var Proc
