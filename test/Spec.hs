@@ -1,8 +1,12 @@
 import Constraint
 import ConstraintInclusion
 import Data.Set as Set
+import Data.Map as Map
 import Index (monIndex, nIndex, zeroIndex, (.+.))
 import Normalization
+import PiCalculus
+import SType
+import STypeCheck
 
 main :: IO ()
 main = do
@@ -20,20 +24,23 @@ main = do
   print $ findConical (Set.fromList [[-1, -1]]) [0, -3]
   print $ findConical (Set.fromList [[0, 1, 0], [1, 0, 0]]) [2, 3, 1]
   print $ findConical (Set.fromList [[1, 0, 0, -3], [0, 1, 1, -2], [0, 0, -1, 0]]) [2, 3, 2, -15]
-  print $ generateUnivariateConstraints ((head . toList . normalizeConstraint) cnew)
+  print $ generateUnivariateConstraints ((head . Set.toList . normalizeConstraint) cnew)
+  print $ checkProc Set.empty Set.empty addProcGamma addProc
 
-i = [0]
+i : j : k : l : m : n : o : rest = [0 ..]
 
-j = [1]
+[iM, jM, kM, lM, ijM] = [[i], [j], [k], [l], [i, j]]
 
-k = [2]
+c1 = normalizeConstraint $ monIndex iM 1 .+. nIndex (-3) :<=: zeroIndex -- 1i - 3 <= 0
 
-ij = [0, 1]
+c2 = normalizeConstraint $ monIndex jM 1 .+. monIndex kM 1 .+. nIndex (-2) :<=: zeroIndex -- 1j + 1k - 2 <= 0
 
-c1 = normalizeConstraint $ monIndex i 1 .+. nIndex (-3) :<=: zeroIndex -- 1i - 3 <= 0
+c3 = normalizeConstraint $ monIndex kM (-1) :<=: zeroIndex -- -1k <= 0
 
-c2 = normalizeConstraint $ monIndex j 1 .+. monIndex k 1 .+. nIndex (-2) :<=: zeroIndex -- 1j + 1k - 2 <= 0
+cnew = monIndex iM 2 .+. monIndex jM 3 .+. monIndex kM 2 .+. nIndex (-15) :<=: zeroIndex -- 2i + 3j + 2k -15 <= 0
 
-c3 = normalizeConstraint $ monIndex k (-1) :<=: zeroIndex -- -1k <= 0
+addProc = RepInputP "add" ["x", "y", "r"] (MatchNatP (VarE "x") (OutputP "r" [VarE "y"]) "z" (TickP $ OutputP "add" [VarE "z", SuccE (VarE "y"), VarE "r"]))
 
-cnew = monIndex i 2 .+. monIndex j 3 .+. monIndex k 2 .+. nIndex (-15) :<=: zeroIndex -- 2i + 3j + 2k -15 <= 0
+[inCap, outCap, inOutCap] = [Set.singleton InputC, Set.singleton OutputC, Set.fromList [InputC, OutputC]]
+
+addProcGamma = Map.singleton "add" $ ServST zeroIndex [i, j, k, l, m, n, o] (monIndex jM 1) [BaseST (NatBT zeroIndex (monIndex jM 1)), BaseST (NatBT zeroIndex (monIndex jM 1)), ChST (monIndex jM 1) [BaseST (NatBT zeroIndex (monIndex jM 1 .+. monIndex lM 1))] outCap] inOutCap

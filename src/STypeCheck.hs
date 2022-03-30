@@ -1,5 +1,5 @@
 module STypeCheck
-  (
+  ( checkProc,
   )
 where
 
