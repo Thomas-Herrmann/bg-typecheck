@@ -9,16 +9,18 @@ where
 import Data.Set
 import Index (NormalizedIndex (..), Subst, VarID, substituteVars)
 
-data IOCapability = InputC | OutputC deriving (Eq, Ord)
+data IOCapability = InputC | OutputC deriving (Eq, Ord, Show)
 
 data BType
   = NatBT NormalizedIndex NormalizedIndex
   | ListBT NormalizedIndex NormalizedIndex BType
+  deriving (Show)
 
 data SType
   = BaseST BType
   | ChST NormalizedIndex [SType] (Set IOCapability)
   | ServST NormalizedIndex [VarID] NormalizedIndex [SType] (Set IOCapability)
+  deriving (Show)
 
 substituteVars :: SType -> Subst -> SType
 substituteVars (BaseST bType) subst = BaseST (substituteVarsB bType subst)

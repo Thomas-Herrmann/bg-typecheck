@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleInstances #-}
+
 module STypeCheck
   ( checkProc,
   )
@@ -5,13 +7,23 @@ where
 
 import Constraint (Constraint (..), NormalizedConstraint (..))
 import ConstraintInclusion (constraintsInclude)
+import qualified Data.Functor
 import Data.Map as Map
 import Data.Set as Set
 import Index (NormalizedIndex, Subst, VarID, equalsConstant, evaluate, oneIndex, substituteVars, zeroIndex, (.*.), (.+.), (.-.), (./.))
-import Intervals (checkJudgement)
 import Normalization (normalizeConstraint, normalizeIndex)
 import PiCalculus (Exp (..), Proc (..), Var)
 import SType (BType (..), IOCapability (..), SType (..), substituteVars)
+
+instance MonadFail (Either String) where
+  fail = Left
+
+type Check a = Either String a
+
+failWith :: Maybe a -> String -> Either String a
+failWith val msg = case val of
+  Just val -> Right val
+  Nothing -> Left msg
 
 type Context = Map Var SType
 
@@ -28,15 +40,16 @@ joinIndexVariables :: Set VarID -> Set VarID -> Set VarID
 joinIndexVariables = Set.union -- for the multivariate implementation
 --joinIndexVariables _ vphi = vphi -- for the univariate implementation (union for the multivariate case)
 
-advance :: Set VarID -> Set NormalizedConstraint -> NormalizedIndex -> SType -> Maybe SType
-advance _ _ _ t@(BaseST _) = Just t
-advance vphi phi ixI (ChST ixJ ts sigma) | checkJudgement vphi phi (NormalizedConstraint (ixI .-. ixJ)) = Just $ ChST (ixJ .-. ixI) ts sigma
+advance :: Set VarID -> Set NormalizedConstraint -> NormalizedIndex -> SType -> Check SType
+advance _ _ _ t@(BaseST _) = return t
+advance vphi phi ixI (ChST ixJ ts sigma)
+  | checkJudgements vphi phi (ixJ :>=: ixI) = return $ ChST (ixJ .-. ixI) ts sigma
+  | otherwise = fail "Failed to advance"
 advance vphi phi ixI (ServST ixJ is k ts sigma)
-  | checkJudgement vphi phi (NormalizedConstraint (ixI .-. ixJ)) = Just $ ServST (ixJ .-. ixI) is k ts sigma
-  | otherwise = Just $ ServST (ixJ .-. ixI) is k ts (sigma `Set.intersection` Set.singleton OutputC)
-advance _ _ _ _ = Nothing
+  | checkJudgements vphi phi (ixJ :>=: ixI) = return $ ServST (ixJ .-. ixI) is k ts sigma
+  | otherwise = return $ ServST (ixJ .-. ixI) is k ts (sigma `Set.intersection` Set.singleton OutputC)
 
-advanceContext :: Set VarID -> Set NormalizedConstraint -> NormalizedIndex -> Context -> Maybe Context
+advanceContext :: Set VarID -> Set NormalizedConstraint -> NormalizedIndex -> Context -> Check Context
 advanceContext vphi phi ix g = sequence (Map.map (advance vphi phi ix) g)
 
 defaultBaseType = NatBT zeroIndex zeroIndex
@@ -46,19 +59,19 @@ ready vphi phi = Map.foldrWithKey filterMap Map.empty
   where
     filterMap v t@(BaseST _) gamma = Map.insert v t gamma
     filterMap v (ServST ixI is k ts sigma) gamma
-      | checkJudgement vphi phi (NormalizedConstraint ixI) =
+      | checkJudgements vphi phi (ixI :<=: zeroIndex) =
         Map.insert v (ServST ixI is k ts (sigma `Set.intersection` Set.singleton OutputC)) gamma
     filterMap _ _ gamma = gamma
 
 isSubBaseType :: Set VarID -> Set NormalizedConstraint -> BType -> BType -> Bool
 -- (SS-nweak)
 isSubBaseType vphi phi (NatBT ixI ixJ) (NatBT ixI' ixJ') =
-  checkJudgement vphi phi (NormalizedConstraint (ixI' .-. ixI))
-    && checkJudgement vphi phi (NormalizedConstraint (ixJ .-. ixJ'))
+  checkJudgements vphi phi (ixI' :<=: ixI)
+    && checkJudgements vphi phi (ixJ :<=: ixJ')
 -- (SS-lweak)
 isSubBaseType vphi phi (ListBT ixI ixJ bt) (ListBT ixI' ixJ' bt') =
-  checkJudgement vphi phi (NormalizedConstraint (ixI' .-. ixI))
-    && checkJudgement vphi phi (NormalizedConstraint (ixJ .-. ixJ'))
+  checkJudgements vphi phi (ixI' :<=: ixI)
+    && checkJudgements vphi phi (ixJ :<=: ixJ')
     && isSubBaseType vphi phi bt bt'
 isSubBaseType _ _ _ _ = False
 
@@ -67,24 +80,24 @@ isSubTypeList vphi phi ts ts' =
   length ts == length ts'
     && Prelude.foldr (\(t', t) b -> b && isSubType vphi phi t' t) True (Prelude.zip ts' ts)
 
-baseJoin :: Set VarID -> Set NormalizedConstraint -> BType -> BType -> Maybe BType
+baseJoin :: Set VarID -> Set NormalizedConstraint -> BType -> BType -> Check BType
 baseJoin vphi phi (NatBT ixI ixJ) (NatBT ixI' ixJ')
-  | constraintsInclude phi (ixI :<=: ixI') && constraintsInclude phi (ixJ' :<=: ixJ) = Just (NatBT ixI ixJ)
-  | constraintsInclude phi (ixI' :<=: ixI) && constraintsInclude phi (ixJ' :<=: ixJ) = Just (NatBT ixI' ixJ)
-  | constraintsInclude phi (ixI :<=: ixI') && constraintsInclude phi (ixJ :<=: ixJ') = Just (NatBT ixI ixJ')
-  | constraintsInclude phi (ixI' :<=: ixI) && constraintsInclude phi (ixJ :<=: ixJ') = Just (NatBT ixI' ixJ')
+  | constraintsInclude phi (ixI :<=: ixI') && constraintsInclude phi (ixJ' :<=: ixJ) = return (NatBT ixI ixJ)
+  | constraintsInclude phi (ixI' :<=: ixI) && constraintsInclude phi (ixJ' :<=: ixJ) = return (NatBT ixI' ixJ)
+  | constraintsInclude phi (ixI :<=: ixI') && constraintsInclude phi (ixJ :<=: ixJ') = return (NatBT ixI ixJ')
+  | constraintsInclude phi (ixI' :<=: ixI) && constraintsInclude phi (ixJ :<=: ixJ') = return (NatBT ixI' ixJ')
 baseJoin vphi phi (ListBT ixI ixJ b) (ListBT ixI' ixJ' b')
-  | constraintsInclude phi (ixI :<=: ixI') && constraintsInclude phi (ixJ' :<=: ixJ) = baseJoin vphi phi b b' >>= (Just . ListBT ixI ixJ)
-  | constraintsInclude phi (ixI' :<=: ixI) && constraintsInclude phi (ixJ' :<=: ixJ) = baseJoin vphi phi b b' >>= (Just . ListBT ixI' ixJ)
-  | constraintsInclude phi (ixI :<=: ixI') && constraintsInclude phi (ixJ :<=: ixJ') = baseJoin vphi phi b b' >>= (Just . ListBT ixI ixJ)
-  | constraintsInclude phi (ixI' :<=: ixI) && constraintsInclude phi (ixJ :<=: ixJ') = baseJoin vphi phi b b' >>= (Just . ListBT ixI' ixJ)
-baseJoin _ _ _ _ = Nothing
+  | constraintsInclude phi (ixI :<=: ixI') && constraintsInclude phi (ixJ' :<=: ixJ) = baseJoin vphi phi b b' Data.Functor.<&> ListBT ixI ixJ
+  | constraintsInclude phi (ixI' :<=: ixI) && constraintsInclude phi (ixJ' :<=: ixJ) = baseJoin vphi phi b b' Data.Functor.<&> ListBT ixI' ixJ
+  | constraintsInclude phi (ixI :<=: ixI') && constraintsInclude phi (ixJ :<=: ixJ') = baseJoin vphi phi b b' Data.Functor.<&> ListBT ixI ixJ
+  | constraintsInclude phi (ixI' :<=: ixI) && constraintsInclude phi (ixJ :<=: ixJ') = baseJoin vphi phi b b' Data.Functor.<&> ListBT ixI' ixJ
+baseJoin _ _ _ _ = fail "baseJoin fail"
 
-instantiate :: [VarID] -> [SType] -> Maybe Subst
+instantiate :: [VarID] -> [SType] -> Check Subst
 instantiate vars types =
   case instantiate' vars types of
-    Just ([], s) -> Just s
-    _ -> Nothing
+    Just ([], s) -> return s
+    _ -> fail "instantiate fail"
 
 instantiate' :: [VarID] -> [SType] -> Maybe ([VarID], Subst)
 instantiate' vars [] = Just (vars, Map.empty)
@@ -112,16 +125,15 @@ isSubType vphi phi (ServST ixI is ixK ts sigma) (ServST ixJ js ixK' ts' sigma')
   | ixI == ixJ && is == js && sigma == sigma' && sigma' == inOutCapa =
     isSubTypeList vphi' phi ts ts'
       && isSubTypeList vphi' phi ts' ts
-      && checkJudgement vphi' phi (NormalizedConstraint (ixK .-. ixK'))
-      && checkJudgement vphi' phi (NormalizedConstraint (ixK' .-. ixK))
+      && checkJudgements vphi' phi (ixK :=: ixK')
   -- (SS-scovar)
   | ixI == ixJ && is == js && sigma == sigma' && sigma' == inCapa =
     isSubTypeList vphi' phi ts ts'
-      && checkJudgement vphi' phi (NormalizedConstraint (ixK' .-. ixK))
+      && checkJudgements vphi' phi (ixK' :<=: ixK)
   -- (SS-scontra)
   | ixI == ixJ && is == js && sigma == sigma' && sigma' == outCapa =
     isSubTypeList vphi' phi ts' ts
-      && checkJudgement vphi' phi (NormalizedConstraint (ixK .-. ixK'))
+      && checkJudgements vphi' phi (ixK :<=: ixK')
   -- (SS-srelax)
   | ixI == ixJ && is == js =
     (sigma' `isSubsetOf` sigma)
@@ -149,9 +161,9 @@ isSubType _ _ _ _ = False
 isSubTypes :: Set VarID -> Set NormalizedConstraint -> [SType] -> [SType] -> Bool
 isSubTypes vphi phi t1s t2s = Prelude.foldr (\(t1, t2) res -> res && isSubType vphi phi t1 t2) True (zip t1s t2s)
 
-checkExp :: Set VarID -> Set NormalizedConstraint -> Map Var SType -> Exp -> Maybe SType
+checkExp :: Set VarID -> Set NormalizedConstraint -> Map Var SType -> Exp -> Check SType
 -- (S-ZERO)
-checkExp _ _ _ ZeroE = Just $ BaseST (NatBT zeroIndex zeroIndex)
+checkExp _ _ _ ZeroE = return $ BaseST (NatBT zeroIndex zeroIndex)
 --
 -- (S-SUCC)
 checkExp vphi phi gamma (SuccE e) = do
@@ -159,10 +171,10 @@ checkExp vphi phi gamma (SuccE e) = do
   return $ BaseST (NatBT (ixI .+. oneIndex) (ixJ .+. oneIndex))
 --
 -- (S-VAR)
-checkExp _ _ gamma (VarE v) = Map.lookup v gamma
+checkExp _ _ gamma (VarE v) = Map.lookup v gamma `failWith` "(S-var) fail"
 --
 -- (S-EMPTY)
-checkExp _ _ _ (ListE []) = Just $ BaseST (ListBT zeroIndex zeroIndex defaultBaseType)
+checkExp _ _ _ (ListE []) = return $ BaseST (ListBT zeroIndex zeroIndex defaultBaseType)
 --
 -- (S-CONS)
 checkExp vphi phi gamma (ListE (e : e')) = do
@@ -171,7 +183,7 @@ checkExp vphi phi gamma (ListE (e : e')) = do
   bJoined <- baseJoin vphi phi b b'
   return $ BaseST (ListBT (ixI .+. oneIndex) (ixJ .+. oneIndex) bJoined)
 
-checkExps :: Set VarID -> Set NormalizedConstraint -> Map Var SType -> [Exp] -> Maybe [SType]
+checkExps :: Set VarID -> Set NormalizedConstraint -> Map Var SType -> [Exp] -> Check [SType]
 checkExps vphi phi gamma = mapM (checkExp vphi phi gamma)
 
 hasCapability :: IOCapability -> Var -> Context -> Bool
@@ -191,9 +203,9 @@ isServer gamma a =
     Just ServST {} -> True
     _ -> False
 
-checkProc :: Set VarID -> Set NormalizedConstraint -> Map Var SType -> Proc -> Maybe NormalizedIndex
+checkProc :: Set VarID -> Set NormalizedConstraint -> Map Var SType -> Proc -> Check NormalizedIndex
 -- (S-nil)
-checkProc _ _ _ NilP = Just zeroIndex
+checkProc _ _ _ NilP = return zeroIndex
 --
 -- (S-tick)
 checkProc vphi phi gamma (TickP p) = do
@@ -206,7 +218,7 @@ checkProc vphi phi gamma (RestrictP v t p) = checkProc vphi phi (Map.insert v t 
 --
 -- (S-ich)
 checkProc vphi phi gamma (InputP a vs p) | hasInputCapability a gamma = do
-  (ChST ixI ts cap) <- Map.lookup a gamma
+  (ChST ixI ts cap) <- Map.lookup a gamma `failWith` "Invalid variable during S-ich"
   gammaA <- advanceContext vphi phi ixI gamma
   let gammaA' = gammaA `Map.union` Map.singleton a (ChST zeroIndex ts cap) `Map.union` Map.fromList (zip vs ts)
   k <- checkProc vphi phi gammaA' p
@@ -214,33 +226,33 @@ checkProc vphi phi gamma (InputP a vs p) | hasInputCapability a gamma = do
 --
 -- (S-och)
 checkProc vphi phi gamma (OutputP a es) | hasOutputCapability a gamma && not (isServer gamma a) = do
-  (ChST ixI ss cap) <- Map.lookup a gamma
+  (ChST ixI ss cap) <- Map.lookup a gamma `failWith` "Invalid variable during S-och"
   gammaA <- advanceContext vphi phi ixI gamma
   ts <- checkExps vphi phi gamma es
   if isSubTypes vphi phi ts ss
     then return ixI
-    else Nothing
+    else fail $ "(S-och) fail ~T <= ~S where " ++ "~T = " ++ show ts ++ ", ~S = " ++ show ss
 --
 -- (S-oserv)
 checkProc vphi phi gamma (OutputP a es) | hasOutputCapability a gamma && isServer gamma a = do
-  (ServST ixI is k ss cap) <- Map.lookup a gamma
+  (ServST ixI is k ss cap) <- Map.lookup a gamma `failWith` "(S-oserv) fail 1"
   gammaA <- advanceContext vphi phi ixI gamma
   ts <- checkExps vphi phi gamma es
   subst <- instantiate is ts
   if isSubTypes vphi phi ts (Prelude.map (`SType.substituteVars` subst) ss)
     then return $ Index.substituteVars k subst
-    else Nothing
+    else fail "(S-oserv) fail 2"
 --
 -- (S-iserv)
 checkProc vphi phi gamma (RepInputP a vs p) | hasInputCapability a gamma = do
-  (ServST ixI is k ts cap) <- Map.lookup a gamma
+  (ServST ixI is k ts cap) <- Map.lookup a gamma `failWith` "(S-iserv) fail 1"
   gammaA <- advanceContext vphi phi ixI gamma
   let gammaAR = ready vphi phi gammaA
   let gammaAR' = gammaAR `Map.union` Map.singleton a (ServST zeroIndex is k ts outCapa) `Map.union` Map.fromList (zip vs ts)
   k' <- checkProc vphi phi gammaAR' p
   if checkJudgements (vphi `joinIndexVariables` Set.fromList is) phi (k' :<=: k)
     then return ixI
-    else Nothing
+    else fail "(S-iserv) fail 2"
 --
 -- (S-par)
 checkProc vphi phi gamma (p :|: q) = do
@@ -263,7 +275,7 @@ checkProc vphi phi gamma (MatchNatP e p x q) = do
         | otherwise = k .+. k'
   return l
 --
--- (S-lmatch-1) + (S-lmatch-2)
+-- (S-lmatch)
 checkProc vphi phi gamma (MatchListP e p x y q) = do
   BaseST (ListBT ixI ixJ b) <- checkExp vphi phi gamma e
   k <- checkProc vphi (phi `Set.union` normalizeConstraint (ixI :<=: zeroIndex)) gamma p
@@ -273,4 +285,4 @@ checkProc vphi phi gamma (MatchListP e p x y q) = do
         | checkJudgements vphi phi (k :<=: k') = k'
         | otherwise = k .+. k'
   return l
-checkProc _ _ _ _ = Nothing
+checkProc _ _ _ _ = fail "Unhandled process fail"
