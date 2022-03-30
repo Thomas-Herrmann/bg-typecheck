@@ -13,8 +13,8 @@ import Index (NormalizedIndex (..), VarID, evaluate)
 
 data Interval
   = EmptyI
-  | PairI Float Float
-  | InfI Float
+  | PairI Double Double
+  | InfI Double
   deriving (Eq)
 
 intersect :: Interval -> Interval -> Interval
@@ -94,7 +94,7 @@ findIntervals i (NormalizedConstraint f)
     invalidPolynomial =
       Prelude.foldr (\ms b -> not b || (not (MultiSet.null ms) && MultiSet.distinctElems ms /= [i])) True $ Map.keys f
 
-nonnegativeRoots :: VarID -> NormalizedIndex -> Maybe [Float]
+nonnegativeRoots :: VarID -> NormalizedIndex -> Maybe [Double]
 nonnegativeRoots i f
   | isConstant = Just []
   | invalidPolynomial || tooHighDegree = Nothing
@@ -114,7 +114,7 @@ nonnegativeRoots i f
 
     coeff n =
       case Map.lookup (MultiSet.fromList $ Prelude.take n [i, i ..]) f of
-        Just m -> fromIntegral m
+        Just m -> m
         _ -> 0
 
     roots = quartForm (coeff 0) (coeff 1) (coeff 2) (coeff 3) (coeff 4)

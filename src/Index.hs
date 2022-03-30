@@ -6,6 +6,7 @@ module Index
     substituteVar,
     substituteVars,
     indexCoeffs,
+    indexVariables,
     zeroIndex,
     oneIndex,
     subIndex,
@@ -20,6 +21,8 @@ module Index
     Subst,
     Monomial,
     indexMonomials,
+    isUnivariate,
+    degree,
   )
 where
 
@@ -38,7 +41,7 @@ data Index = NatI Natural | VarI VarID | Index :+: Index | Index :-: Index | Ind
 
 type Monomial = MultiSet VarID
 
-type NormalizedIndex = Map Monomial Integer
+type NormalizedIndex = Map Monomial Double
 
 instance Show Index where
   show (NatI n) = show n
@@ -49,16 +52,15 @@ instance Show Index where
 
 equalsConstant ix c = Map.size ix == 1 && Map.lookup MultiSet.empty ix == Just c
 
--- todo: this should technically be integers!
-evaluate :: NormalizedIndex -> Map VarID Float -> Maybe Float
-evaluate f subst = Map.foldrWithKey (\monomial coeff res -> instantiate monomial >>= (\prod -> res >>= (\sum -> Just (fromIntegral coeff * prod + sum)))) (Just 0) f
+evaluate :: NormalizedIndex -> Map VarID Double -> Maybe Double
+evaluate f subst = Map.foldrWithKey (\monomial coeff res -> instantiate monomial >>= (\prod -> res >>= (\sum -> Just (coeff * prod + sum)))) (Just 0) f
   where
     instantiate = MultiSet.fold (\i mProd -> Map.lookup i subst >>= (\n -> mProd >>= (\prod -> Just (n * prod)))) $ Just 1
 
 substituteVar :: NormalizedIndex -> VarID -> NormalizedIndex -> NormalizedIndex
 substituteVar ixI var ixJ = Map.foldrWithKey (\monomial coeff res -> monomialSubstitute monomial coeff var ixJ .+. res) zeroIndex ixI
   where
-    monomialSubstitute :: Monomial -> Integer -> VarID -> NormalizedIndex -> NormalizedIndex
+    monomialSubstitute :: Monomial -> Double -> VarID -> NormalizedIndex -> NormalizedIndex
     monomialSubstitute monomial coeff var ixJ = List.foldr (.*.) (Map.singleton strippedMonomial coeff) (List.concat (List.replicate varOccurences [ixJ]))
       where
         varOccurences = MultiSet.occur var monomial
@@ -71,11 +73,14 @@ substituteVars ixI subst = Prelude.foldr ((.+.) . replace) Map.empty $ Map.assoc
       let (joint, disjoint) = MultiSet.partition (`Map.member` subst) ms
        in MultiSet.fold ((.*.) . (subst !)) (Map.singleton disjoint n) joint
 
-indexCoeffs :: NormalizedIndex -> [Integer]
+indexCoeffs :: NormalizedIndex -> [Double]
 indexCoeffs = Map.elems
 
 indexMonomials :: NormalizedIndex -> Set Monomial
 indexMonomials = Map.keysSet
+
+indexVariables :: NormalizedIndex -> Set VarID
+indexVariables ix = Set.fold Set.union Set.empty (Set.map MultiSet.toSet (indexMonomials ix))
 
 zeroIndex :: NormalizedIndex
 zeroIndex = Map.empty
@@ -83,11 +88,14 @@ zeroIndex = Map.empty
 oneIndex :: NormalizedIndex
 oneIndex = Map.singleton MultiSet.empty 1
 
-nIndex :: Integer -> NormalizedIndex
+nIndex :: Double -> NormalizedIndex
 nIndex = Map.singleton MultiSet.empty
 
-monIndex :: [VarID] -> Integer -> NormalizedIndex
+monIndex :: [VarID] -> Double -> NormalizedIndex
 monIndex mon = Map.singleton (MultiSet.fromList mon)
+
+degree :: NormalizedIndex -> Int
+degree = maximum . Prelude.map (\(k, _) -> MultiSet.size k) . Map.toList
 
 subIndex :: NormalizedIndex -> NormalizedIndex -> Bool
 subIndex f f' = Prelude.foldr foldf True $ Map.keysSet f `Set.union` Map.keysSet f'
@@ -109,8 +117,11 @@ subIndex f f' = Prelude.foldr foldf True $ Map.keysSet f `Set.union` Map.keysSet
 (.*.) :: NormalizedIndex -> NormalizedIndex -> NormalizedIndex
 (.*.) f1 f2 = Map.fromListWith (+) [(ims `MultiSet.union` ims', n * m) | (ims, n) <- Map.assocs f1, (ims', m) <- Map.assocs f2]
 
-(./.) :: NormalizedIndex -> Integer -> NormalizedIndex
-(./.) f1 n = Map.map (`div` n) f1
+(./.) :: NormalizedIndex -> Double -> NormalizedIndex
+(./.) f1 n = Map.map (/ n) f1
 
 showNormalizedIndex :: NormalizedIndex -> String
 showNormalizedIndex f = intercalate " + " $ Prelude.map (\(ims, n) -> show n ++ Prelude.foldr (\i s -> "*i" ++ show i ++ s) "" ims) (Map.assocs f)
+
+isUnivariate :: NormalizedIndex -> Bool
+isUnivariate ix = Set.size (indexVariables ix) == 1

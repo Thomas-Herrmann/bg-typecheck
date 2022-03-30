@@ -14,7 +14,7 @@ import GHC.Natural (Natural, naturalToInteger)
 import Index (Index (..), NormalizedIndex, VarID, oneIndex, zeroIndex, (.*.), (.+.), (.-.), (./.))
 
 normalizeIndex :: Index -> NormalizedIndex
-normalizeIndex (NatI n) = Map.singleton MultiSet.empty $ naturalToInteger n
+normalizeIndex (NatI n) = Map.singleton MultiSet.empty $ fromIntegral (naturalToInteger n)
 normalizeIndex (VarI i) = Map.singleton (MultiSet.singleton i) 1
 normalizeIndex (ixI :+: ixJ) = Map.unionWith (+) (normalizeIndex ixI) (normalizeIndex ixJ)
 normalizeIndex (ixI :-: ixJ) = Map.unionWith (+) (normalizeIndex ixI) (Map.map (* (-1)) (normalizeIndex ixJ))
