@@ -11,8 +11,6 @@ import Index (Index, NormalizedIndex, VarID, indexCoeffs, indexVariables, isUniv
 data Constraint
   = NormalizedIndex :<=: NormalizedIndex
   | NormalizedIndex :>=: NormalizedIndex
-  | NormalizedIndex :<: NormalizedIndex
-  | NormalizedIndex :>: NormalizedIndex
   | NormalizedIndex :=: NormalizedIndex
   deriving (Eq, Ord)
 
@@ -21,8 +19,6 @@ newtype NormalizedConstraint = NormalizedConstraint NormalizedIndex deriving (Eq
 instance Show Constraint where
   show (f :<=: f') = showNormalizedIndex f ++ " <= " ++ showNormalizedIndex f'
   show (f :>=: f') = showNormalizedIndex f ++ " >= " ++ showNormalizedIndex f'
-  show (f :<: f') = showNormalizedIndex f ++ " < " ++ showNormalizedIndex f'
-  show (f :>: f') = showNormalizedIndex f ++ " > " ++ showNormalizedIndex f'
   show (f :=: f') = showNormalizedIndex f ++ " == " ++ showNormalizedIndex f'
 
 instance Show NormalizedConstraint where

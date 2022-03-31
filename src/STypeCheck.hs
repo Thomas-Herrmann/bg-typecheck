@@ -18,7 +18,7 @@ import PiCalculus (Exp (..), Proc (..), Var)
 import SType (BType (..), IOCapability (..), SType (..), substituteVars)
 
 newtype CheckState = CheckState
-  { stack :: [String]
+  { stack :: [(String, [(String, String)])]
   }
 
 type Check a = StateT CheckState (Either (CheckState, String)) a
@@ -37,9 +37,9 @@ returnError msg = do
   s <- get
   throwError (s, msg)
 
-inContext :: String -> Check a -> Check a
-inContext s action = do
-  modify $ \st -> st {stack = s : stack st}
+inContext :: String -> [(String, String)] -> Check a -> Check a
+inContext name bindings action = do
+  modify $ \st -> st {stack = (name, bindings) : stack st}
   res <- action
   modify $ \st -> st {stack = tail $ stack st}
   return res
@@ -101,11 +101,12 @@ baseJoin vphi phi (ListBT ixI ixJ b) (ListBT ixI' ixJ' b')
 baseJoin _ _ _ _ = returnError "baseJoin fail"
 
 instantiate :: [VarID] -> [SType] -> Check Subst
-instantiate vars types = inContext "instantiate" $ do
-  res <- instantiate' vars types
-  case res of
-    ([], s) -> return s
-    res -> returnError $ "instantiate fail " ++ "vars = " ++ show vars ++ ", types = " ++ show types ++ ", (restVar, subst) = " ++ show res
+instantiate vars types =
+  inContext "instantiate" [("vars", show vars), ("types", show types)] $ do
+    res <- instantiate' vars types
+    case res of
+      ([], s) -> return s
+      res -> returnError $ "instantiate fail " ++ "vars = " ++ show vars ++ ", types = " ++ show types ++ ", (restVar, subst) = " ++ show res
 
 instantiate' :: [VarID] -> [SType] -> Check ([VarID], Subst)
 instantiate' vars [] = return (vars, Map.empty)
@@ -183,27 +184,46 @@ isSubType _ _ _ _ = False
 isSubTypes :: Set VarID -> Set NormalizedConstraint -> [SType] -> [SType] -> Bool
 isSubTypes vphi phi t1s t2s = Prelude.foldr (\(t1, t2) res -> res && isSubType vphi phi t1 t2) True (zip t1s t2s)
 
+checkSubType :: Set VarID -> Set NormalizedConstraint -> SType -> SType -> Check ()
+checkSubType vphi phi t1 t2 = do
+  unless (isSubType vphi phi t1 t2) $
+    inContext "checkSubType" [("T", show t1), ("S", show t2)] $
+      returnError "Failed subtype check T <= S"
+
+checkSubTypes :: Set VarID -> Set NormalizedConstraint -> [SType] -> [SType] -> Check ()
+checkSubTypes vphi phi t1s t2s =
+  inContext "checkSubTypes" [("~T", show t1s), ("~S", show t2s)] $
+    foldM (\_ (t1, t2) -> checkSubType vphi phi t1 t2) () (zip t1s t2s)
+
 checkExp :: Set VarID -> Set NormalizedConstraint -> Map Var SType -> Exp -> Check SType
 -- (S-zero)
-checkExp _ _ _ ZeroE = inContext "(S-zero)" $ return $ BaseST (NatBT zeroIndex zeroIndex)
+checkExp _ _ _ exp@ZeroE =
+  inContext "(S-zero)" [("exp", show exp)] $
+    return $ BaseST (NatBT zeroIndex zeroIndex)
 --
 -- (S-succ)
-checkExp vphi phi gamma (SuccE e) = inContext "(S-succ)" $ do
-  (BaseST (NatBT ixI ixJ)) <- checkExp vphi phi gamma e
-  return $ BaseST (NatBT (ixI .+. oneIndex) (ixJ .+. oneIndex))
+checkExp vphi phi gamma exp@(SuccE e) =
+  inContext "(S-succ)" [("exp", show exp)] $ do
+    (BaseST (NatBT ixI ixJ)) <- checkExp vphi phi gamma e
+    return $ BaseST (NatBT (ixI .+. oneIndex) (ixJ .+. oneIndex))
 --
 -- (S-var)
-checkExp _ _ gamma (VarE v) = inContext "(S-var)" $ Map.lookup v gamma `failWith` "unbound variable"
+checkExp _ _ gamma exp@(VarE v) =
+  inContext "(S-var)" [("exp", show exp)] $
+    Map.lookup v gamma `failWith` "unbound variable"
 --
 -- (S-empty)
-checkExp _ _ _ (ListE []) = inContext "(S-empty)" $ return $ BaseST (ListBT zeroIndex zeroIndex defaultBaseType)
+checkExp _ _ _ exp@(ListE []) =
+  inContext "(S-empty)" [("exp", show exp)] $
+    return $ BaseST (ListBT zeroIndex zeroIndex defaultBaseType)
 --
 -- (S-cons)
-checkExp vphi phi gamma (ListE (e : e')) = inContext "(S-cons)" $ do
-  (BaseST b) <- checkExp vphi phi gamma e
-  (BaseST (ListBT ixI ixJ b')) <- checkExp vphi phi gamma (ListE e')
-  bJoined <- baseJoin vphi phi b b'
-  return $ BaseST (ListBT (ixI .+. oneIndex) (ixJ .+. oneIndex) bJoined)
+checkExp vphi phi gamma exp@(ListE (e : e')) =
+  inContext "(S-cons)" [("exp", show exp), ("vphi", show vphi), ("phi", show phi)] $ do
+    (BaseST b) <- checkExp vphi phi gamma e
+    (BaseST (ListBT ixI ixJ b')) <- checkExp vphi phi gamma (ListE e')
+    bJoined <- baseJoin vphi phi b b'
+    return $ BaseST (ListBT (ixI .+. oneIndex) (ixJ .+. oneIndex) bJoined)
 
 checkExps :: Set VarID -> Set NormalizedConstraint -> Map Var SType -> [Exp] -> Check [SType]
 checkExps vphi phi gamma = mapM (checkExp vphi phi gamma)
@@ -230,87 +250,108 @@ checkProc :: Set VarID -> Set NormalizedConstraint -> Map Var SType -> Proc -> C
 checkProc _ _ _ NilP = return zeroIndex
 --
 -- (S-tick)
-checkProc vphi phi gamma (TickP p) = inContext "(S-tick)" $ do
-  gammaA <- advanceContext vphi phi oneIndex gamma
-  k <- checkProc vphi phi gammaA p
-  return $ k .+. oneIndex
+checkProc vphi phi gamma pro@(TickP p) =
+  inContext "(S-tick)" [("process", show pro), ("vphi", show vphi), ("phi", show phi)] $ do
+    gammaA <- advanceContext vphi phi oneIndex gamma
+    k <- checkProc vphi phi gammaA p
+    return $ k .+. oneIndex
 --
 -- (S-nu)
-checkProc vphi phi gamma (RestrictP v t p) = inContext "(S-nu)" $ checkProc vphi phi (Map.insert v t gamma) p
+checkProc vphi phi gamma pro@(RestrictP v t p) =
+  inContext "(S-nu)" [("process", show pro)] $
+    checkProc vphi phi (Map.insert v t gamma) p
 --
 -- (S-ich)
-checkProc vphi phi gamma (InputP a vs p) | hasInputCapability a gamma = inContext "(S-ich)" $ do
-  (ChST ixI ts cap) <- Map.lookup a gamma `failWith` "unbound variable"
-  gammaA <- advanceContext vphi phi ixI gamma
-  let gammaA' = gammaA `Map.union` Map.singleton a (ChST zeroIndex ts cap) `Map.union` Map.fromList (zip vs ts)
-  k <- checkProc vphi phi gammaA' p
-  return $ k .+. ixI
+checkProc vphi phi gamma pro@(InputP a vs p) | hasInputCapability a gamma =
+  inContext "(S-ich)" [("process", show pro), ("vphi", show vphi), ("phi", show phi)] $ do
+    (ChST ixI ts cap) <- Map.lookup a gamma `failWith` "unbound variable"
+    gammaA <- advanceContext vphi phi ixI gamma
+    let gammaA' = gammaA `Map.union` Map.singleton a (ChST zeroIndex ts cap) `Map.union` Map.fromList (zip vs ts)
+    k <- checkProc vphi phi gammaA' p
+    return $ k .+. ixI
 --
 -- (S-och)
-checkProc vphi phi gamma (OutputP a es) | hasOutputCapability a gamma && not (isServer gamma a) = inContext "(S-och)" $ do
-  (ChST ixI ss cap) <- Map.lookup a gamma `failWith` "unbound variable"
-  gammaA <- advanceContext vphi phi ixI gamma
-  ts <- checkExps vphi phi gamma es
-  if isSubTypes vphi phi ts ss
-    then return ixI
-    else returnError $ "(S-och) fail ~T <= ~S where " ++ "~T = " ++ show ts ++ ", ~S = " ++ show ss ++ ", phi = " ++ show phi
+checkProc vphi phi gamma pro@(OutputP a es) | hasOutputCapability a gamma && not (isServer gamma a) =
+  inContext "(S-och)" [("process", show pro), ("vphi", show vphi), ("phi", show phi)] $ do
+    (ChST ixI ss cap) <- Map.lookup a gamma `failWith` "unbound variable"
+    gammaA <- advanceContext vphi phi ixI gamma
+    ts <- checkExps vphi phi gamma es
+    checkSubTypes vphi phi ts ss
+    return ixI
 --
 -- (S-oserv)
-checkProc vphi phi gamma (OutputP a es) | hasOutputCapability a gamma && isServer gamma a = inContext "(S-oserv)" $ do
-  (ServST ixI is k ss cap) <- Map.lookup a gamma `failWith` "unbound variable"
-  gammaA <- advanceContext vphi phi ixI gamma
-  ts <- checkExps vphi phi gamma es
-  subst <- instantiate is ts
-  if isSubTypes vphi phi ts (Prelude.map (`SType.substituteVars` subst) ss)
-    then return $ Index.substituteVars k subst
-    else returnError $ "~T <= ~S where " ++ "~T = " ++ show ts ++ ", ~S = " ++ show ss ++ ", phi = " ++ show phi
+checkProc vphi phi gamma pro@(OutputP a es) | hasOutputCapability a gamma && isServer gamma a =
+  inContext "(S-oserv)" [("process", show pro), ("vphi", show vphi), ("phi", show phi)] $ do
+    (ServST ixI is k ss cap) <- Map.lookup a gamma `failWith` "unbound variable"
+    gammaA <- advanceContext vphi phi ixI gamma
+    ts <- checkExps vphi phi gamma es
+    subst <- instantiate is ts
+    checkSubTypes vphi phi ts (Prelude.map (`SType.substituteVars` subst) ss)
+    return $ Index.substituteVars k subst
 --
 -- (S-iserv)
-checkProc vphi phi gamma (RepInputP a vs p) | hasInputCapability a gamma = inContext "(S-iserv)" $ do
-  (ServST ixI is k ts cap) <- Map.lookup a gamma `failWith` "unbound variable"
-  gammaA <- advanceContext vphi phi ixI gamma
-  let gammaAR = ready vphi phi gammaA
-  let gammaAR' = gammaAR `Map.union` Map.singleton a (ServST zeroIndex is k ts outCapa) `Map.union` Map.fromList (zip vs ts)
-  k' <- checkProc vphi phi gammaAR' p
-  if checkJudgements (vphi `joinIndexVariables` Set.fromList is) phi (k' :<=: k)
-    then return ixI
-    else returnError "Judgement failed"
+checkProc vphi phi gamma pro@(RepInputP a vs p) | hasInputCapability a gamma =
+  inContext "(S-iserv)" [("process", show pro), ("vphi", show vphi), ("phi", show phi)] $ do
+    (ServST ixI is k ts cap) <- Map.lookup a gamma `failWith` "unbound variable"
+    gammaA <- advanceContext vphi phi ixI gamma
+    let gammaAR = ready vphi phi gammaA
+    let gammaAR' = gammaAR `Map.union` Map.singleton a (ServST zeroIndex is k ts outCapa) `Map.union` Map.fromList (zip vs ts)
+    k' <- checkProc vphi phi gammaAR' p
+    if checkJudgements (vphi `joinIndexVariables` Set.fromList is) phi (k' :<=: k)
+      then return ixI
+      else returnError "Judgement failed"
 --
 -- (S-par)
-checkProc vphi phi gamma (p :|: q) = inContext "(S-par)" $ do
-  k <- checkProc vphi phi gamma p
-  k' <- checkProc vphi phi gamma q
-  let l
-        | checkJudgements vphi phi (k :<=: k') = k
-        | checkJudgements vphi phi (k :<=: k') = k'
-        | otherwise = k .+. k'
-  return l
+checkProc vphi phi gamma pro@(p :|: q) =
+  inContext "(S-par)" [("process", show pro), ("vphi", show vphi), ("phi", show phi)] $ do
+    k <- checkProc vphi phi gamma p
+    k' <- checkProc vphi phi gamma q
+    let l
+          | checkJudgements vphi phi (k :<=: k') = k
+          | checkJudgements vphi phi (k :<=: k') = k'
+          | otherwise = k .+. k'
+    return l
 --
 -- (S-nmatch)
-checkProc vphi phi gamma (MatchNatP e p x q) = inContext "(S-nmatch)" $ do
-  BaseST (NatBT ixI ixJ) <- checkExp vphi phi gamma e
-  k <- checkProc vphi (phi `Set.union` normalizeConstraint (ixI :<=: zeroIndex)) gamma p
-  k' <- checkProc vphi (phi `Set.union` normalizeConstraint (ixJ :>=: oneIndex)) (gamma `Map.union` Map.singleton x (BaseST (NatBT (ixI .-. oneIndex) (ixJ .-. oneIndex)))) q
-  let l
-        | checkJudgements vphi phi (k :<=: k') = k
-        | checkJudgements vphi phi (k :<=: k') = k'
-        | otherwise = k .+. k'
-  return l
+checkProc vphi phi gamma pro@(MatchNatP e p x q) =
+  inContext "(S-nmatch)" [("process", show pro), ("vphi", show vphi), ("phi", show phi)] $ do
+    BaseST (NatBT ixI ixJ) <- checkExp vphi phi gamma e
+    k <- checkProc vphi (phi `Set.union` normalizeConstraint (ixI :<=: zeroIndex)) gamma p
+    k' <- checkProc vphi (phi `Set.union` normalizeConstraint (ixJ :>=: oneIndex)) (gamma `Map.union` Map.singleton x (BaseST (NatBT (ixI .-. oneIndex) (ixJ .-. oneIndex)))) q
+    let l
+          | checkJudgements vphi phi (k :<=: k') = k
+          | checkJudgements vphi phi (k :<=: k') = k'
+          | otherwise = k .+. k'
+    return l
 --
 -- (S-lmatch)
-checkProc vphi phi gamma (MatchListP e p x y q) = inContext "(S-lmatch)" $ do
-  BaseST (ListBT ixI ixJ b) <- checkExp vphi phi gamma e
-  k <- checkProc vphi (phi `Set.union` normalizeConstraint (ixI :<=: zeroIndex)) gamma p
-  k' <- checkProc vphi (phi `Set.union` normalizeConstraint (ixJ :>=: oneIndex)) (gamma `Map.union` Map.fromList [(x, BaseST b), (y, BaseST (ListBT (ixI .-. oneIndex) (ixJ .-. oneIndex) b))]) q
-  let l
-        | checkJudgements vphi phi (k :<=: k') = k
-        | checkJudgements vphi phi (k :<=: k') = k'
-        | otherwise = k .+. k'
-  return l
-checkProc _ _ _ _ = inContext "invalid process" $ returnError "Unhandled process fail"
+checkProc vphi phi gamma pro@(MatchListP e p x y q) =
+  inContext "(S-lmatch)" [("process", show pro), ("vphi", show vphi), ("phi", show phi)] $ do
+    BaseST (ListBT ixI ixJ b) <- checkExp vphi phi gamma e
+    k <- checkProc vphi (phi `Set.union` normalizeConstraint (ixI :<=: zeroIndex)) gamma p
+    k' <- checkProc vphi (phi `Set.union` normalizeConstraint (ixJ :>=: oneIndex)) (gamma `Map.union` Map.fromList [(x, BaseST b), (y, BaseST (ListBT (ixI .-. oneIndex) (ixJ .-. oneIndex) b))]) q
+    let l
+          | checkJudgements vphi phi (k :<=: k') = k
+          | checkJudgements vphi phi (k :<=: k') = k'
+          | otherwise = k .+. k'
+    return l
+checkProc _ _ _ pro = inContext "invalid process" [("process", show pro)] $ returnError "Unhandled process fail"
 
 checkProcess :: Set VarID -> Set NormalizedConstraint -> Map Var SType -> Proc -> Either String NormalizedIndex
 checkProcess vphi phi gamma p =
   case evalStateT (checkProc vphi phi gamma p) (CheckState {stack = []}) of
-    Left (CheckState s, msg) -> Left $ "Error during process check: " ++ msg ++ "\nStackTrace: " ++ show s
+    Left (CheckState s, msg) ->
+      Left $
+        "Error during process check: " ++ msg ++ "\n"
+          ++ "StackTrace: "
+          ++ show (Prelude.map fst s)
+          ++ "\n"
+          ++ "Relevant bindings: "
+          ++ (if not (Prelude.null s) then (showBindings . snd . head) s else "Invalid")
+          ++ "Relevant bindings 2: "
+          ++ (if Prelude.length s >= 2 then (showBindings . snd . head . tail) s else "Invalid")
+          ++ "Relentant bindings 3: "
+          ++ (if Prelude.length s >= 3 then (showBindings . snd . head . tail . tail) s else "Invalid")
     Right k -> Right k
+  where
+    showBindings bindings = "\n" ++ Prelude.foldr (\(var, t) acc -> "  " ++ var ++ " : " ++ t ++ "\n" ++ acc) "" bindings

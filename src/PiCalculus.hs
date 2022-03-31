@@ -15,6 +15,7 @@ data Exp
   | SuccE Exp
   | ListE [Exp]
   | VarE Var
+  deriving (Show)
 
 data Proc
   = NilP
@@ -26,3 +27,4 @@ data Proc
   | RestrictP Var SType Proc
   | MatchNatP Exp Proc Var Proc
   | MatchListP Exp Proc Var Var Proc
+  deriving (Show)

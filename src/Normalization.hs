@@ -11,7 +11,7 @@ import Data.Map as Map
 import Data.MultiSet as MultiSet
 import Data.Set as Set
 import GHC.Natural (Natural, naturalToInteger)
-import Index (Index (..), NormalizedIndex, VarID, oneIndex, zeroIndex, (.*.), (.+.), (.-.), (./.))
+import Index
 
 normalizeIndex :: Index -> NormalizedIndex
 normalizeIndex (NatI n) = Map.singleton MultiSet.empty $ fromIntegral (naturalToInteger n)
@@ -24,8 +24,9 @@ normalizeIndex (ixI :*: ixJ) = Map.fromListWith (+) [(ims `MultiSet.union` ims',
     f' = normalizeIndex ixJ
 
 normalizeConstraint :: Constraint -> Set NormalizedConstraint
-normalizeConstraint (ixI :<=: ixJ) = Set.singleton $ NormalizedConstraint (ixI .-. ixJ)
-normalizeConstraint (ixI :>=: ixJ) = Set.singleton $ NormalizedConstraint (ixJ .-. ixI)
-normalizeConstraint (ixI :<: ixJ) = Set.singleton $ NormalizedConstraint (ixI .-. (ixJ .+. oneIndex))
-normalizeConstraint (ixI :>: ixJ) = Set.singleton $ NormalizedConstraint (ixJ .-. (ixI .+. oneIndex))
-normalizeConstraint (ixI :=: ixJ) = Set.fromList [NormalizedConstraint (ixI .-. ixJ), NormalizedConstraint (ixJ .-. ixI)]
+normalizeConstraint (ixI :<=: ixJ) = Set.singleton $ NormalizedConstraint (adjustMonus ixI .-. adjustMonus ixJ)
+normalizeConstraint (ixI :>=: ixJ) = Set.singleton $ NormalizedConstraint (adjustMonus ixJ .-. adjustMonus ixI)
+normalizeConstraint (ixI :=: ixJ) = Set.fromList [NormalizedConstraint (adjustMonus ixI .-. adjustMonus ixJ), NormalizedConstraint (adjustMonus ixJ .-. adjustMonus ixI)]
+
+adjustMonus :: NormalizedIndex -> NormalizedIndex
+adjustMonus ix = if Prelude.foldr (\c a -> c <= 0 && a) True (indexCoeffs ix) then zeroIndex else ix

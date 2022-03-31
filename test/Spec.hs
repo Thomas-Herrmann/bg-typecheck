@@ -25,7 +25,9 @@ main = do
   print $ findConical (Set.fromList [[0, 1, 0], [1, 0, 0]]) [2, 3, 1]
   print $ findConical (Set.fromList [[1, 0, 0, -3], [0, 1, 1, -2], [0, 0, -1, 0]]) [2, 3, 2, -15]
   print $ generateUnivariateConstraints ((head . Set.toList . normalizeConstraint) cnew)
-  print $ checkProcess Set.empty Set.empty addProcGamma addProc
+  putStr $ case checkProcess Set.empty Set.empty addProcGamma addProc of
+    Left err -> err
+    Right res -> show res
 
 i : j : k : l : m : n : o : rest = [0 ..]
 
