@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleInstances #-}
+
 module Index
   ( Index (..),
     NormalizedIndex,
@@ -49,6 +51,9 @@ instance Show Index where
   show (ixI :+: ixJ) = "(" ++ show ixI ++ "+" ++ show ixJ ++ ")"
   show (ixI :-: ixJ) = "(" ++ show ixI ++ "-" ++ show ixJ ++ ")"
   show (ixI :*: ixJ) = show ixI ++ show ixJ
+
+instance {-# OVERLAPPING #-} Show NormalizedIndex where
+  show ix = "{" ++ showNormalizedIndex ix ++ "}"
 
 equalsConstant ix c = Map.size ix == 1 && Map.lookup MultiSet.empty ix == Just c
 
