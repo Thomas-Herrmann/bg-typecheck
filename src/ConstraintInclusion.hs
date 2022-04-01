@@ -88,15 +88,17 @@ generateUnivariateConstraint (NormalizedConstraint ix) i = do
   ix' <- Map.foldrWithKey foldFunc (Just Map.empty) ix
   return (NormalizedConstraint ix')
   where
-    -- TODO fix the thing with constant terms
     foldFunc :: Monomial -> Double -> Maybe NormalizedIndex -> Maybe NormalizedIndex
     foldFunc monomial coeff acc = do
       acc <- acc
-      when (coeff < 0 && (MultiSet.notMember i monomial || Set.size (MultiSet.toSet monomial) > 1)) Nothing
-      if Set.size (MultiSet.toSet monomial) == 1
+      when (coeff < 0 && (MultiSet.notMember i monomial && numDistinctVars monomial > 0)) Nothing -- If we see a term with negative coefficient that contains other variables than i, we can't remove it
+      if numDistinctVars (MultiSet.deleteAll i monomial) > 0
         then return acc
         else return $ acc .+. Map.singleton (insertMany i (MultiSet.occur i monomial) MultiSet.empty) coeff
 
+    numDistinctVars monomial = Set.size (MultiSet.toSet monomial)
+
+-- Constructs a linear constraint with the same properties as a non-linear constraint
 constructLinearConstraint :: NormalizedConstraint -> Maybe NormalizedConstraint
 constructLinearConstraint c | not (isUnivariate c) = Nothing
 constructLinearConstraint (NormalizedConstraint ix) = do
