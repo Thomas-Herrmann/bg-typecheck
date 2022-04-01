@@ -2,6 +2,8 @@ module PiCalculus
   ( Var,
     Exp (..),
     Proc (..),
+    natExp,
+    nTick,
   )
 where
 
@@ -9,6 +11,14 @@ import Index (Subst)
 import SType (SType)
 
 type Var = String
+
+natExp :: Int -> Exp
+natExp 0 = ZeroE
+natExp n = SuccE (natExp (n - 1))
+
+nTick :: Int -> Proc -> Proc
+nTick 0 p = p
+nTick n p = nTick (n - 1) (TickP p)
 
 data Exp
   = ZeroE

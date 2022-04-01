@@ -27,6 +27,3 @@ normalizeConstraint :: Constraint -> Set NormalizedConstraint
 normalizeConstraint (ixI :<=: ixJ) = Set.singleton $ NormalizedConstraint (adjustMonus ixI .-. adjustMonus ixJ)
 normalizeConstraint (ixI :>=: ixJ) = Set.singleton $ NormalizedConstraint (adjustMonus ixJ .-. adjustMonus ixI)
 normalizeConstraint (ixI :=: ixJ) = Set.fromList [NormalizedConstraint (adjustMonus ixI .-. adjustMonus ixJ), NormalizedConstraint (adjustMonus ixJ .-. adjustMonus ixI)]
-
-adjustMonus :: NormalizedIndex -> NormalizedIndex
-adjustMonus ix = if Prelude.foldr (\c a -> c <= 0 && a) True (indexCoeffs ix) then zeroIndex else ix

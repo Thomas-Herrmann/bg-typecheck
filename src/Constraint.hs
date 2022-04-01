@@ -22,7 +22,7 @@ instance Show Constraint where
   show (f :=: f') = showNormalizedIndex f ++ " == " ++ showNormalizedIndex f'
 
 instance Show NormalizedConstraint where
-  show (NormalizedConstraint ixI) = show ixI
+  show (NormalizedConstraint ixI) = show ixI ++ " <= 0"
 
 indexVariables :: NormalizedConstraint -> Set VarID
 indexVariables (NormalizedConstraint ix) = Index.indexVariables ix

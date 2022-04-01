@@ -63,7 +63,7 @@ advance :: Set VarID -> Set NormalizedConstraint -> NormalizedIndex -> SType -> 
 advance _ _ _ t@(BaseST _) = return t
 advance vphi phi ixI (ChST ixJ ts sigma)
   | checkJudgements vphi phi (ixJ :>=: ixI) = return $ ChST (ixJ .-. ixI) ts sigma
-  | otherwise = returnError "Failed to advance"
+  | otherwise = return $ ChST (ixJ .-. ixI) ts Set.empty
 advance vphi phi ixI (ServST ixJ is k ts sigma)
   | checkJudgements vphi phi (ixJ :>=: ixI) = return $ ServST (ixJ .-. ixI) is k ts sigma
   | otherwise = return $ ServST (ixJ .-. ixI) is k ts (sigma `Set.intersection` Set.singleton OutputC)
@@ -150,11 +150,11 @@ isSubType vphi phi (ServST ixI is ixK ts sigma) (ServST ixJ js ixK' ts' sigma')
       && isSubTypeList vphi' phi ts' ts
       && checkJudgements vphi' phi (ixK :=: ixK')
   -- (SS-scovar)
-  | ixI == ixJ && is == js && sigma == sigma' && sigma' == inCapa =
+  | ixI == ixJ && is == js && inCapa `Set.isSubsetOf` sigma && sigma' == inCapa =
     isSubTypeList vphi' phi ts ts'
       && checkJudgements vphi' phi (ixK' :<=: ixK)
   -- (SS-scontra)
-  | ixI == ixJ && is == js && sigma == sigma' && sigma' == outCapa =
+  | ixI == ixJ && is == js && outCapa `Set.isSubsetOf` sigma && sigma' == outCapa =
     isSubTypeList vphi' phi ts' ts
       && checkJudgements vphi' phi (ixK :<=: ixK')
   -- (SS-srelax)
@@ -169,10 +169,10 @@ isSubType vphi phi (ChST ixI ts sigma) (ChST ixJ ts' sigma')
     isSubTypeList vphi phi ts ts'
       && isSubTypeList vphi phi ts' ts
   -- (SS-ccovar)
-  | ixI == ixJ && sigma == sigma' && sigma' == inCapa =
+  | ixI == ixJ && inCapa `Set.isSubsetOf` sigma && sigma' == inCapa =
     isSubTypeList vphi phi ts ts'
   -- (SS-ccontra)
-  | ixI == ixJ && sigma == sigma' && sigma' == outCapa =
+  | ixI == ixJ && outCapa `Set.isSubsetOf` sigma && sigma' == outCapa =
     isSubTypeList vphi phi ts' ts
   -- (SS-crelax)
   | ixI == ixJ =
@@ -307,7 +307,7 @@ checkProc vphi phi gamma pro@(p :|: q) =
     k <- checkProc vphi phi gamma p
     k' <- checkProc vphi phi gamma q
     let l
-          | checkJudgements vphi phi (k :<=: k') = k
+          | checkJudgements vphi phi (k' :<=: k) = k
           | checkJudgements vphi phi (k :<=: k') = k'
           | otherwise = k .+. k'
     return l
@@ -319,7 +319,7 @@ checkProc vphi phi gamma pro@(MatchNatP e p x q) =
     k <- checkProc vphi (phi `Set.union` normalizeConstraint (ixI :<=: zeroIndex)) gamma p
     k' <- checkProc vphi (phi `Set.union` normalizeConstraint (ixJ :>=: oneIndex)) (gamma `Map.union` Map.singleton x (BaseST (NatBT (ixI .-. oneIndex) (ixJ .-. oneIndex)))) q
     let l
-          | checkJudgements vphi phi (k :<=: k') = k
+          | checkJudgements vphi phi (k' :<=: k) = k
           | checkJudgements vphi phi (k :<=: k') = k'
           | otherwise = k .+. k'
     return l
@@ -331,15 +331,14 @@ checkProc vphi phi gamma pro@(MatchListP e p x y q) =
     k <- checkProc vphi (phi `Set.union` normalizeConstraint (ixI :<=: zeroIndex)) gamma p
     k' <- checkProc vphi (phi `Set.union` normalizeConstraint (ixJ :>=: oneIndex)) (gamma `Map.union` Map.fromList [(x, BaseST b), (y, BaseST (ListBT (ixI .-. oneIndex) (ixJ .-. oneIndex) b))]) q
     let l
-          | checkJudgements vphi phi (k :<=: k') = k
+          | checkJudgements vphi phi (k' :<=: k) = k
           | checkJudgements vphi phi (k :<=: k') = k'
           | otherwise = k .+. k'
     return l
-checkProc _ _ _ pro = inContext "invalid process" [("process", show pro)] $ returnError "Unhandled process fail"
+checkProc _ _ _ pro = inContext "invalid process" [("process", show pro)] $ returnError "No valid type rule"
 
-checkProcess :: Set VarID -> Set NormalizedConstraint -> Map Var SType -> Proc -> Either String NormalizedIndex
-checkProcess vphi phi gamma p =
-  case evalStateT (checkProc vphi phi gamma p) (CheckState {stack = []}) of
+evalCheck :: Check a -> Either String a
+evalCheck c = case evalStateT c (CheckState {stack = []}) of
     Left (CheckState s, msg) ->
       Left $
         "Error during process check: " ++ msg ++ "\n"
@@ -350,8 +349,11 @@ checkProcess vphi phi gamma p =
           ++ (if not (Prelude.null s) then (showBindings . snd . head) s else "Invalid")
           ++ "Relevant bindings 2: "
           ++ (if Prelude.length s >= 2 then (showBindings . snd . head . tail) s else "Invalid")
-          ++ "Relentant bindings 3: "
+          ++ "Relevant bindings 3: "
           ++ (if Prelude.length s >= 3 then (showBindings . snd . head . tail . tail) s else "Invalid")
     Right k -> Right k
   where
     showBindings bindings = "\n" ++ Prelude.foldr (\(var, t) acc -> "  " ++ var ++ " : " ++ t ++ "\n" ++ acc) "" bindings
+
+checkProcess :: Set VarID -> Set NormalizedConstraint -> Map Var SType -> Proc -> Either String NormalizedIndex
+checkProcess vphi phi gamma p = evalCheck $ checkProc vphi phi gamma p
