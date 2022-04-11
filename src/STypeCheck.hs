@@ -245,6 +245,15 @@ isServer gamma a =
     Just ServST {} -> True
     _ -> False
 
+-- Safely subtracts two indices taking monus behavior into account
+safeIndexSubtraction :: Set VarID -> Set NormalizedConstraint -> NormalizedIndex -> NormalizedIndex -> Check NormalizedIndex
+safeIndexSubtraction vphi phi ixI ixJ =
+  inContext "safeIndexSubtraction" [("ixI", show ixI), ("ixJ", show ixJ)] $ do
+    case (checkJudgements vphi phi (ixI :>=: ixJ), checkJudgements vphi phi (ixI :<=: zeroIndex)) of
+      (True, _) -> return (ixI .-. ixJ)
+      (_, True) -> return zeroIndex
+      _ -> returnError "Failed index subtraction ixI - ixJ"
+
 checkProc :: Set VarID -> Set NormalizedConstraint -> Map Var SType -> Proc -> Check NormalizedIndex
 -- (S-nil)
 checkProc _ _ _ NilP = return zeroIndex
@@ -317,7 +326,9 @@ checkProc vphi phi gamma pro@(MatchNatP e p x q) =
   inContext "(S-nmatch)" [("process", show pro), ("vphi", show vphi), ("phi", show phi)] $ do
     BaseST (NatBT ixI ixJ) <- checkExp vphi phi gamma e
     k <- checkProc vphi (phi `Set.union` normalizeConstraint (ixI :<=: zeroIndex)) gamma p
-    k' <- checkProc vphi (phi `Set.union` normalizeConstraint (ixJ :>=: oneIndex)) (gamma `Map.union` Map.singleton x (BaseST (NatBT (ixI .-. oneIndex) (ixJ .-. oneIndex)))) q
+    ixI' <- safeIndexSubtraction vphi (phi `Set.union` normalizeConstraint (ixJ :>=: oneIndex)) ixI oneIndex
+    ixJ' <- safeIndexSubtraction vphi (phi `Set.union` normalizeConstraint (ixJ :>=: oneIndex)) ixJ oneIndex
+    k' <- checkProc vphi (phi `Set.union` normalizeConstraint (ixJ :>=: oneIndex)) (gamma `Map.union` Map.singleton x (BaseST (NatBT ixI' ixJ'))) q
     let l
           | checkJudgements vphi phi (k' :<=: k) = k
           | checkJudgements vphi phi (k :<=: k') = k'
@@ -329,7 +340,9 @@ checkProc vphi phi gamma pro@(MatchListP e p x y q) =
   inContext "(S-lmatch)" [("process", show pro), ("vphi", show vphi), ("phi", show phi)] $ do
     BaseST (ListBT ixI ixJ b) <- checkExp vphi phi gamma e
     k <- checkProc vphi (phi `Set.union` normalizeConstraint (ixI :<=: zeroIndex)) gamma p
-    k' <- checkProc vphi (phi `Set.union` normalizeConstraint (ixJ :>=: oneIndex)) (gamma `Map.union` Map.fromList [(x, BaseST b), (y, BaseST (ListBT (ixI .-. oneIndex) (ixJ .-. oneIndex) b))]) q
+    ixI' <- safeIndexSubtraction vphi (phi `Set.union` normalizeConstraint (ixJ :>=: oneIndex)) ixI oneIndex
+    ixJ' <- safeIndexSubtraction vphi (phi `Set.union` normalizeConstraint (ixJ :>=: oneIndex)) ixJ oneIndex
+    k' <- checkProc vphi (phi `Set.union` normalizeConstraint (ixJ :>=: oneIndex)) (gamma `Map.union` Map.fromList [(x, BaseST b), (y, BaseST (ListBT ixI' ixJ' b))]) q
     let l
           | checkJudgements vphi phi (k' :<=: k) = k
           | checkJudgements vphi phi (k :<=: k') = k'
@@ -339,19 +352,19 @@ checkProc _ _ _ pro = inContext "invalid process" [("process", show pro)] $ retu
 
 evalCheck :: Check a -> Either String a
 evalCheck c = case evalStateT c (CheckState {stack = []}) of
-    Left (CheckState s, msg) ->
-      Left $
-        "Error during process check: " ++ msg ++ "\n"
-          ++ "StackTrace: "
-          ++ show (Prelude.map fst s)
-          ++ "\n"
-          ++ "Relevant bindings: "
-          ++ (if not (Prelude.null s) then (showBindings . snd . head) s else "Invalid")
-          ++ "Relevant bindings 2: "
-          ++ (if Prelude.length s >= 2 then (showBindings . snd . head . tail) s else "Invalid")
-          ++ "Relevant bindings 3: "
-          ++ (if Prelude.length s >= 3 then (showBindings . snd . head . tail . tail) s else "Invalid")
-    Right k -> Right k
+  Left (CheckState s, msg) ->
+    Left $
+      "Error during process check: " ++ msg ++ "\n"
+        ++ "StackTrace: "
+        ++ show (Prelude.map fst s)
+        ++ "\n"
+        ++ "Relevant bindings: "
+        ++ (if not (Prelude.null s) then (showBindings . snd . head) s else "Invalid")
+        ++ "Relevant bindings 2: "
+        ++ (if Prelude.length s >= 2 then (showBindings . snd . head . tail) s else "Invalid")
+        ++ "Relevant bindings 3: "
+        ++ (if Prelude.length s >= 3 then (showBindings . snd . head . tail . tail) s else "Invalid")
+  Right k -> Right k
   where
     showBindings bindings = "\n" ++ Prelude.foldr (\(var, t) acc -> "  " ++ var ++ " : " ++ t ++ "\n" ++ acc) "" bindings
 

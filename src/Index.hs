@@ -131,6 +131,3 @@ showNormalizedIndex f = intercalate " + " $ Prelude.map (\(ims, n) -> show n ++ 
 
 isUnivariate :: NormalizedIndex -> Bool
 isUnivariate ix = Set.size (indexVariables ix) == 1
-
-adjustMonus :: NormalizedIndex -> NormalizedIndex
-adjustMonus ix = if Prelude.foldr (\c a -> c <= 0 && a) True (indexCoeffs ix) then zeroIndex else ix

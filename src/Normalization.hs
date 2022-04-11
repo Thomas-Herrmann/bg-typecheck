@@ -24,6 +24,6 @@ normalizeIndex (ixI :*: ixJ) = Map.fromListWith (+) [(ims `MultiSet.union` ims',
     f' = normalizeIndex ixJ
 
 normalizeConstraint :: Constraint -> Set NormalizedConstraint
-normalizeConstraint (ixI :<=: ixJ) = Set.singleton $ NormalizedConstraint (adjustMonus ixI .-. adjustMonus ixJ)
-normalizeConstraint (ixI :>=: ixJ) = Set.singleton $ NormalizedConstraint (adjustMonus ixJ .-. adjustMonus ixI)
-normalizeConstraint (ixI :=: ixJ) = Set.fromList [NormalizedConstraint (adjustMonus ixI .-. adjustMonus ixJ), NormalizedConstraint (adjustMonus ixJ .-. adjustMonus ixI)]
+normalizeConstraint (ixI :<=: ixJ) = Set.singleton $ NormalizedConstraint (ixI .-. ixJ)
+normalizeConstraint (ixI :>=: ixJ) = Set.singleton $ NormalizedConstraint (ixJ .-. ixI)
+normalizeConstraint (ixI :=: ixJ) = Set.fromList [NormalizedConstraint (ixI .-. ixJ), NormalizedConstraint (ixJ .-. ixI)]
