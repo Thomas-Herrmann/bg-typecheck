@@ -7,6 +7,7 @@ module Index
     evaluate,
     substituteVar,
     substituteVars,
+    indexBias,
     indexCoeffs,
     indexVariables,
     zeroIndex,
@@ -25,7 +26,6 @@ module Index
     indexMonomials,
     isUnivariate,
     degree,
-    adjustMonus,
   )
 where
 
@@ -88,6 +88,9 @@ indexMonomials = Map.keysSet
 indexVariables :: NormalizedIndex -> Set VarID
 indexVariables ix = Set.fold Set.union Set.empty (Set.map MultiSet.toSet (indexMonomials ix))
 
+indexBias :: NormalizedIndex -> Double
+indexBias = Map.findWithDefault 0 MultiSet.empty
+
 zeroIndex :: NormalizedIndex
 zeroIndex = Map.empty
 
@@ -101,7 +104,7 @@ monIndex :: [VarID] -> Double -> NormalizedIndex
 monIndex mon = Map.singleton (MultiSet.fromList mon)
 
 degree :: NormalizedIndex -> Int
-degree = maximum . Prelude.map (\(k, _) -> MultiSet.size k) . Map.toList
+degree ix = if Map.null ix then 0 else (maximum . Prelude.map (\(k, _) -> MultiSet.size k) . Map.toList) ix
 
 subIndex :: NormalizedIndex -> NormalizedIndex -> Bool
 subIndex f f' = Prelude.foldr foldf True $ Map.keysSet f `Set.union` Map.keysSet f'
@@ -127,7 +130,10 @@ subIndex f f' = Prelude.foldr foldf True $ Map.keysSet f `Set.union` Map.keysSet
 (./.) f1 n = Map.map (/ n) f1
 
 showNormalizedIndex :: NormalizedIndex -> String
-showNormalizedIndex f = intercalate " + " $ Prelude.map (\(ims, n) -> show n ++ Prelude.foldr (\i s -> "*i" ++ show i ++ s) "" ims) (Map.assocs f)
+showNormalizedIndex f =
+  if Map.null f
+    then "0"
+    else intercalate " + " $ Prelude.map (\(ims, n) -> show n ++ Prelude.foldr (\i s -> "*i" ++ show i ++ s) "" ims) (Map.assocs f)
 
 isUnivariate :: NormalizedIndex -> Bool
 isUnivariate ix = Set.size (indexVariables ix) == 1

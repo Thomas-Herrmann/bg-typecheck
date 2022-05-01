@@ -8,38 +8,115 @@ module ConstraintInclusion
   )
 where
 
-import Constraint (Constraint ((:<=:)), NormalizedConstraint (NormalizedConstraint), isUnivariate)
-import Control.Monad (when)
+import Conduit
+import Constraint (Constraint ((:<=:)), NormalizedConstraint (NormalizedConstraint), invertConstraint, isUnivariate, maxIndexVar)
+import Control.Monad (replicateM, when)
+import Control.Monad.ST
 import Data.Array
 import Data.Complex (Complex ((:+)))
 import Data.Map as Map hiding (notMember)
 import Data.Maybe
 import Data.MultiSet as MultiSet
 import Data.Set as Set hiding (notMember)
-import Index (Monomial, NormalizedIndex, VarID, degree, evaluate, indexMonomials, indexVariables, monIndex, nIndex, zeroIndex, (.+.))
-import Matrix.Simplex (Simplex (Optimal), twophase)
+import Debug.Trace (trace)
+import Index (Monomial, NormalizedIndex, VarID, degree, evaluate, indexBias, indexCoeffs, indexMonomials, indexVariables, monIndex, nIndex, oneIndex, zeroIndex, (.+.), (.-.))
+import Matrix.Simplex (Simplex (Infeasible, Optimal), simplex, twophase)
 import Normalization (normalizeConstraint, normalizeIndex)
+import Numeric.Optimization.MIP.Base (def)
 import Polynomial.Roots (roots)
+import ToySolver.Arith.Simplex
+import qualified ToySolver.Data.LA as LA
 
 type VectorizedConstraint = [Double]
 
 constraintsInclude :: Set NormalizedConstraint -> Constraint -> Bool
-constraintsInclude phi constraint = Prelude.foldr ((&&) . constraintsInclude' phi) True normalizedConstraint
+constraintsInclude phi constraint = Prelude.foldr ((&&) . constraintsInclude' phi') True normalizedConstraint
   where
     normalizedConstraint = normalizeConstraint constraint
+    phi' = Set.delete (NormalizedConstraint Map.empty) phi
 
 constraintsInclude' :: Set NormalizedConstraint -> NormalizedConstraint -> Bool
 constraintsInclude' phi constraint =
-  case findConical vectorizedPhi vectorizedCon of
-    Optimal _ -> True
-    _ -> False
+  triviallySatisfied constraint
+    || ( not (triviallyNotSatisfied constraint)
+           && case solveSimplexToy vphi phiWInvert of
+             Unsat -> True
+             val -> False
+       )
   where
-    linearizedPhi = Set.foldr Set.union Set.empty (Set.map generateUnivariateConstraints phi)
-    phi' = Set.union phi linearizedPhi
-    vphi = allMonomials (Set.insert constraint phi')
-    vphiList = Set.toList vphi
-    vectorizedPhi = Set.map (vectorizeConstraint vphiList) phi'
-    vectorizedCon = vectorizeConstraint vphiList constraint
+    invConstraint = invertConstraint constraint
+    linearizedPhi = Set.foldr Set.union Set.empty (Set.map generateUnivariateConstraints phi) -- Create linear constraints from polynomial constraints
+    phiWInvert = Set.insert invConstraint (phi `Set.union` linearizedPhi)
+    vphi = allMonomials (Set.insert invConstraint phiWInvert) -- Find vphi consisting of all index variables in phi
+
+-- Checks if a normalized constraint is trivially satisfied by checking if all coefficients are nonpositive
+triviallySatisfied :: NormalizedConstraint -> Bool
+triviallySatisfied (NormalizedConstraint ix) = allNonpositive (indexCoeffs ix)
+  where
+    allNonpositive coeffs = all (<= 0) coeffs
+
+-- Checks if a normalized constraint is trivially not satisfied by checking if all coefficients are positive and bias is also positive
+triviallyNotSatisfied :: NormalizedConstraint -> Bool
+triviallyNotSatisfied (NormalizedConstraint ix) = allPositive (indexCoeffs ix) && indexBias ix > 0
+  where
+    allPositive coeffs = all (> 0) coeffs
+
+-- Adds slack variables to constraints to make them from = 0 to <= 0
+-- Returns the new constraints and the new slack variables
+addSlackVariables :: Set NormalizedConstraint -> (Set NormalizedConstraint, Set VarID)
+addSlackVariables phi = (newPhi, Set.fromList $ Prelude.take (length phi) slackVars)
+  where
+    maxVar = maxIndexVar phi
+    slackVars = [maxVar + 1 ..]
+    phiList = Set.toList phi
+    newPhi = Set.fromList $ zipWith (curry (\(NormalizedConstraint ix, v) -> NormalizedConstraint (ix .+. monIndex [v] 1))) phiList slackVars
+
+solveSimplexToy :: Set (MultiSet VarID) -> Set NormalizedConstraint -> OptResult
+solveSimplexToy vphi phi = runST $ do
+  solver <- newSolver
+  vars <- replicateM (Prelude.length vphiList) (newVar solver)
+  setObj solver $ LA.fromTerms [(1, v) | v <- vars]
+  let atoms = Set.map (constraintToAtom vars) phi
+  mapM_ (assertAtom solver) atoms
+  dualSimplex solver def
+  where
+    vphiList = Set.toList (Set.delete MultiSet.empty vphi)
+
+    -- Separate constant term from constraint
+    splitConstraint :: NormalizedConstraint -> (VectorizedConstraint, Double)
+    splitConstraint (NormalizedConstraint ix) = (vectorizeConstraint vphiList (NormalizedConstraint ix), - (indexBias ix))
+
+    -- Convert constraint to toysolver form
+    constraintToAtom :: [Var] -> NormalizedConstraint -> Atom Rational
+    constraintToAtom vars c@(NormalizedConstraint ix) =
+      let (coeffs, bias) = splitConstraint c
+          lhs = indexToExpr vars (Map.delete MultiSet.empty ix)
+       in lhs .<=. LA.constant (toRational bias)
+
+    indexToExpr :: [Var] -> NormalizedIndex -> LA.Expr Rational
+    indexToExpr vars ix = LA.fromTerms [(toRational coeff, vphiIntMap Map.! mon) | (mon, coeff) <- Map.toList ix]
+      where
+        vphiIntMap = Map.fromList $ zip vphiList vars
+
+solveSimplex :: Set Monomial -> Set NormalizedConstraint -> Simplex (Array (Int, Int) Double)
+solveSimplex vphi phi = simplex arr
+  where
+    (phi', vphiSlack) = addSlackVariables phi -- Add slack variables to phi'
+    vphi' = Set.union vphi (Set.map MultiSet.singleton vphiSlack) -- Add slack variables to vphi
+    vphiList = Set.toList (Set.delete MultiSet.empty vphi')
+
+    -- Separate constant term from constraint
+    (vectorizedPhi, b) = unzip . Set.toList $ Set.map (\(NormalizedConstraint ix) -> (vectorizeConstraint vphiList (NormalizedConstraint ix), - (indexBias ix))) phi'
+
+    arr = array dims [((i, j), arrayBuilder i j) | (i, j) <- range dims]
+    dims = ((0, 0), (Prelude.length b, Prelude.length vphiList))
+
+    -- Create simplex tableau
+    arrayBuilder :: Int -> Int -> Double
+    arrayBuilder 0 0 = -1 -- -z
+    arrayBuilder 0 j = 1 -- c'
+    arrayBuilder i 0 = b !! (i - 1) -- b
+    arrayBuilder i j = vectorizedPhi !! (i - 1) !! (j - 1) -- A
 
 findConical :: Set VectorizedConstraint -> VectorizedConstraint -> Simplex (Array (Int, Int) Double)
 findConical vecPhi vecCon = twophase arr
@@ -74,6 +151,8 @@ vectorizeConstraint vphi (NormalizedConstraint ix) = Prelude.map (fromMaybe 0 . 
 
 allMonomials :: Set NormalizedConstraint -> Set Monomial
 allMonomials = Prelude.foldr (\(NormalizedConstraint ix) a -> indexMonomials ix `Set.union` a) Set.empty
+
+-- Polynomial stuff
 
 -- Attempts to remove terms to get univariate constraints
 generateUnivariateConstraints :: NormalizedConstraint -> Set NormalizedConstraint

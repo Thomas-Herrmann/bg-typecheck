@@ -48,6 +48,9 @@ library
     , dsp
     , array
     , mtl
+    , toysolver
+    , MIP
+    , conduit
   default-language: Haskell2010
 
 executable p10-exe
@@ -78,4 +81,5 @@ test-suite p10-test
     , containers
     , multiset
     , dsp
+    , hspec
   default-language: Haskell2010

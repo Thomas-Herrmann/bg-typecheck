@@ -63,10 +63,12 @@ advance :: Set VarID -> Set NormalizedConstraint -> NormalizedIndex -> SType -> 
 advance _ _ _ t@(BaseST _) = return t
 advance vphi phi ixI (ChST ixJ ts sigma)
   | checkJudgements vphi phi (ixJ :>=: ixI) = return $ ChST (ixJ .-. ixI) ts sigma
-  | otherwise = return $ ChST (ixJ .-. ixI) ts Set.empty
+  | otherwise = return $ ChST zeroIndex ts Set.empty
 advance vphi phi ixI (ServST ixJ is k ts sigma)
   | checkJudgements vphi phi (ixJ :>=: ixI) = return $ ServST (ixJ .-. ixI) is k ts sigma
-  | otherwise = return $ ServST (ixJ .-. ixI) is k ts (sigma `Set.intersection` Set.singleton OutputC)
+  | otherwise = do
+    ix' <- safeIndexSubtraction vphi phi ixI ixJ
+    return $ ServST ix' is k ts (sigma `Set.intersection` Set.singleton OutputC)
 
 advanceContext :: Set VarID -> Set NormalizedConstraint -> NormalizedIndex -> Context -> Check Context
 advanceContext vphi phi ix g = sequence (Map.map (advance vphi phi ix) g)
@@ -248,7 +250,7 @@ isServer gamma a =
 -- Safely subtracts two indices taking monus behavior into account
 safeIndexSubtraction :: Set VarID -> Set NormalizedConstraint -> NormalizedIndex -> NormalizedIndex -> Check NormalizedIndex
 safeIndexSubtraction vphi phi ixI ixJ =
-  inContext "safeIndexSubtraction" [("ixI", show ixI), ("ixJ", show ixJ)] $ do
+  inContext "safeIndexSubtraction" [("ixI", show ixI), ("ixJ", show ixJ), ("phi", show phi)] $ do
     case (checkJudgements vphi phi (ixI :>=: ixJ), checkJudgements vphi phi (ixI :<=: zeroIndex)) of
       (True, _) -> return (ixI .-. ixJ)
       (_, True) -> return zeroIndex
