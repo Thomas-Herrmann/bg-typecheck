@@ -16,6 +16,8 @@ import Index (NormalizedIndex, Subst, VarID, equalsConstant, evaluate, oneIndex,
 import Normalization (normalizeConstraint, normalizeIndex)
 import PiCalculus (Exp (..), Proc (..), Var)
 import SType (BType (..), IOCapability (..), SType (..), substituteVars)
+import CombinedComplexity
+import Control.Exception
 
 newtype CheckState = CheckState
   { stack :: [(String, [(String, String)])]
@@ -207,7 +209,7 @@ checkExp _ _ _ exp@ZeroE =
 checkExp vphi phi gamma exp@(SuccE e) =
   inContext "(S-succ)" [("exp", show exp)] $ do
     (BaseST (NatBT ixI ixJ)) <- checkExp vphi phi gamma e
-    return $ BaseST (NatBT (ixI .+. oneIndex) (ixJ .+. oneIndex))
+    return $ BaseST (NatBT (ixI Index..+. oneIndex) (ixJ Index..+. oneIndex))
 --
 -- (S-var)
 checkExp _ _ gamma exp@(VarE v) =
@@ -225,7 +227,7 @@ checkExp vphi phi gamma exp@(ListE (e : e')) =
     (BaseST b) <- checkExp vphi phi gamma e
     (BaseST (ListBT ixI ixJ b')) <- checkExp vphi phi gamma (ListE e')
     bJoined <- baseJoin vphi phi b b'
-    return $ BaseST (ListBT (ixI .+. oneIndex) (ixJ .+. oneIndex) bJoined)
+    return $ BaseST (ListBT (ixI Index..+. oneIndex) (ixJ Index..+. oneIndex) bJoined)
 
 checkExps :: Set VarID -> Set NormalizedConstraint -> Map Var SType -> [Exp] -> Check [SType]
 checkExps vphi phi gamma = mapM (checkExp vphi phi gamma)
@@ -256,16 +258,16 @@ safeIndexSubtraction vphi phi ixI ixJ =
       (_, True) -> return zeroIndex
       _ -> returnError "Failed index subtraction ixI - ixJ"
 
-checkProc :: Set VarID -> Set NormalizedConstraint -> Map Var SType -> Proc -> Check NormalizedIndex
+checkProc :: Set VarID -> Set NormalizedConstraint -> Map Var SType -> Proc -> Check CombinedComplexity
 -- (S-nil)
-checkProc _ _ _ NilP = return zeroIndex
+checkProc _ _ _ NilP = return (singleComplexity zeroIndex)
 --
 -- (S-tick)
 checkProc vphi phi gamma pro@(TickP p) =
   inContext "(S-tick)" [("process", show pro), ("vphi", show vphi), ("phi", show phi)] $ do
     gammaA <- advanceContext vphi phi oneIndex gamma
     k <- checkProc vphi phi gammaA p
-    return $ k .+. oneIndex
+    return $ k CombinedComplexity..+. oneIndex
 --
 -- (S-nu)
 checkProc vphi phi gamma pro@(RestrictP v t p) =
@@ -276,10 +278,11 @@ checkProc vphi phi gamma pro@(RestrictP v t p) =
 checkProc vphi phi gamma pro@(InputP a vs p) | hasInputCapability a gamma =
   inContext "(S-ich)" [("process", show pro), ("vphi", show vphi), ("phi", show phi)] $ do
     (ChST ixI ts cap) <- Map.lookup a gamma `failWith` "unbound variable"
+    assert (Set.member InputC cap) $ returnError "input capability not found"
     gammaA <- advanceContext vphi phi ixI gamma
     let gammaA' = gammaA `Map.union` Map.singleton a (ChST zeroIndex ts cap) `Map.union` Map.fromList (zip vs ts)
     k <- checkProc vphi phi gammaA' p
-    return $ k .+. ixI
+    return $ k CombinedComplexity..+. ixI
 --
 -- (S-och)
 checkProc vphi phi gamma pro@(OutputP a es) | hasOutputCapability a gamma && not (isServer gamma a) =
@@ -320,7 +323,7 @@ checkProc vphi phi gamma pro@(p :|: q) =
     let l
           | checkJudgements vphi phi (k' :<=: k) = k
           | checkJudgements vphi phi (k :<=: k') = k'
-          | otherwise = k .+. k'
+          | otherwise = k `Set.union` k'
     return l
 --
 -- (S-nmatch)
@@ -334,7 +337,7 @@ checkProc vphi phi gamma pro@(MatchNatP e p x q) =
     let l
           | checkJudgements vphi phi (k' :<=: k) = k
           | checkJudgements vphi phi (k :<=: k') = k'
-          | otherwise = k .+. k'
+          | otherwise = k `Set.union` k'
     return l
 --
 -- (S-lmatch)
@@ -348,7 +351,7 @@ checkProc vphi phi gamma pro@(MatchListP e p x y q) =
     let l
           | checkJudgements vphi phi (k' :<=: k) = k
           | checkJudgements vphi phi (k :<=: k') = k'
-          | otherwise = k .+. k'
+          | otherwise = k `Set.union` k'
     return l
 checkProc _ _ _ pro = inContext "invalid process" [("process", show pro)] $ returnError "No valid type rule"
 

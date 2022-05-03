@@ -35,6 +35,7 @@ library
     , PiCalculus
     , SType
     , STypeCheck
+    , CombinedComplexity
   other-modules:
       Paths_p10
   hs-source-dirs:
