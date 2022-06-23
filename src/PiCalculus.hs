@@ -36,5 +36,4 @@ data Proc
   | RepInputP Var [Var] Proc
   | RestrictP Var SType Proc
   | MatchNatP Exp Proc Var Proc
-  | MatchListP Exp Proc Var Var Proc
   deriving (Show)

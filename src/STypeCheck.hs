@@ -15,7 +15,7 @@ import Data.Set as Set
 import Index (NormalizedIndex, Subst, VarID, equalsConstant, evaluate, oneIndex, substituteVars, zeroIndex, (.*.), (.+.), (.-.), (./.))
 import Normalization (normalizeConstraint, normalizeIndex)
 import PiCalculus (Exp (..), Proc (..), Var)
-import SType (BType (..), IOCapability (..), SType (..), substituteVars)
+import SType (IOCapability (..), SType (..), substituteVars)
 
 newtype CheckState = CheckState
   { stack :: [(String, [(String, String)])]
@@ -60,25 +60,25 @@ joinIndexVariables = Set.union -- for the multivariate implementation
 --joinIndexVariables _ vphi = vphi -- for the univariate implementation (union for the multivariate case)
 
 advance :: Set VarID -> Set NormalizedConstraint -> NormalizedIndex -> SType -> Check SType
-advance _ _ _ t@(BaseST _) = return t
+advance _ _ _ t@(NatST _ _) = return t
 advance vphi phi ixI (ChST ixJ ts sigma)
   | checkJudgements vphi phi (ixJ :>=: ixI) = return $ ChST (ixJ .-. ixI) ts sigma
   | otherwise = return $ ChST zeroIndex ts Set.empty
 advance vphi phi ixI (ServST ixJ is k ts sigma)
   | checkJudgements vphi phi (ixJ :>=: ixI) = return $ ServST (ixJ .-. ixI) is k ts sigma
-  | otherwise = do
+  | checkJudgements vphi phi (ixI :>=: ixJ) = do
     ix' <- safeIndexSubtraction vphi phi ixI ixJ
     return $ ServST ix' is k ts (sigma `Set.intersection` Set.singleton OutputC)
+  | otherwise = return $ LockedServST ixJ is k ts sigma ixI
 
 advanceContext :: Set VarID -> Set NormalizedConstraint -> NormalizedIndex -> Context -> Check Context
 advanceContext vphi phi ix g = sequence (Map.map (advance vphi phi ix) g)
 
-defaultBaseType = NatBT zeroIndex zeroIndex
 
 ready :: Set VarID -> Set NormalizedConstraint -> Context -> Context
 ready vphi phi = Map.foldrWithKey filterMap Map.empty
   where
-    filterMap v t@(BaseST _) gamma = Map.insert v t gamma
+    filterMap v t@(NatST _ _) gamma = Map.insert v t gamma
     filterMap v (ServST ixI is k ts sigma) gamma
       | checkJudgements vphi phi (ixI :<=: zeroIndex) =
         Map.insert v (ServST ixI is k ts (sigma `Set.intersection` Set.singleton OutputC)) gamma
@@ -89,18 +89,7 @@ isSubTypeList vphi phi ts ts' =
   length ts == length ts'
     && Prelude.foldr (\(t', t) b -> b && isSubType vphi phi t' t) True (Prelude.zip ts' ts)
 
-baseJoin :: Set VarID -> Set NormalizedConstraint -> BType -> BType -> Check BType
-baseJoin vphi phi (NatBT ixI ixJ) (NatBT ixI' ixJ')
-  | constraintsInclude phi (ixI :<=: ixI') && constraintsInclude phi (ixJ' :<=: ixJ) = return (NatBT ixI ixJ)
-  | constraintsInclude phi (ixI' :<=: ixI) && constraintsInclude phi (ixJ' :<=: ixJ) = return (NatBT ixI' ixJ)
-  | constraintsInclude phi (ixI :<=: ixI') && constraintsInclude phi (ixJ :<=: ixJ') = return (NatBT ixI ixJ')
-  | constraintsInclude phi (ixI' :<=: ixI) && constraintsInclude phi (ixJ :<=: ixJ') = return (NatBT ixI' ixJ')
-baseJoin vphi phi (ListBT ixI ixJ b) (ListBT ixI' ixJ' b')
-  | constraintsInclude phi (ixI :<=: ixI') && constraintsInclude phi (ixJ' :<=: ixJ) = baseJoin vphi phi b b' Data.Functor.<&> ListBT ixI ixJ
-  | constraintsInclude phi (ixI' :<=: ixI) && constraintsInclude phi (ixJ' :<=: ixJ) = baseJoin vphi phi b b' Data.Functor.<&> ListBT ixI' ixJ
-  | constraintsInclude phi (ixI :<=: ixI') && constraintsInclude phi (ixJ :<=: ixJ') = baseJoin vphi phi b b' Data.Functor.<&> ListBT ixI ixJ
-  | constraintsInclude phi (ixI' :<=: ixI) && constraintsInclude phi (ixJ :<=: ixJ') = baseJoin vphi phi b b' Data.Functor.<&> ListBT ixI' ixJ
-baseJoin _ _ _ _ = returnError "baseJoin fail"
+
 
 instantiate :: [VarID] -> [SType] -> Check Subst
 instantiate vars types =
@@ -118,11 +107,7 @@ instantiate' vars (t : ts) = do
   return (r, s `Map.union` s')
 
 instantiateSingle :: [VarID] -> SType -> Check ([VarID], Subst)
-instantiateSingle (i : j : k) (BaseST (NatBT ixI ixJ)) = do
-  return (k, Map.fromList [(i, ixI), (j, ixJ)])
-instantiateSingle (i : j : k) (BaseST (ListBT ixI ixJ b)) = do
-  (r, s) <- instantiateSingle k (BaseST b)
-  return (r, s `Map.union` Map.fromList [(i, ixI), (j, ixJ)])
+instantiateSingle (i : j : k) (NatST ixI ixJ) = return (k, Map.fromList [(i, ixI), (j, ixJ)])
 instantiateSingle (i : j) (ChST ixI ts sigma) = do
   (r, s) <- instantiate' j ts
   return (r, s `Map.union` Map.singleton i ixI)
@@ -131,20 +116,9 @@ instantiateSingle (i : j : k) (ServST ixI _ kc ts sigma) = do
   return (r, s `Map.union` Map.fromList [(i, ixI), (j, kc)])
 instantiateSingle vars typ = returnError $ "instantiateSingle fail: " ++ "vars = " ++ show vars ++ ", typ = " ++ show typ
 
-isSubBaseType :: Set VarID -> Set NormalizedConstraint -> BType -> BType -> Bool
--- (SS-nweak)
-isSubBaseType vphi phi (NatBT ixI ixJ) (NatBT ixI' ixJ') =
-  checkJudgements vphi phi (ixI' :<=: ixI)
-    && checkJudgements vphi phi (ixJ :<=: ixJ')
--- (SS-lweak)
-isSubBaseType vphi phi (ListBT ixI ixJ bt) (ListBT ixI' ixJ' bt') =
-  checkJudgements vphi phi (ixI' :<=: ixI)
-    && checkJudgements vphi phi (ixJ :<=: ixJ')
-    && isSubBaseType vphi phi bt bt'
-isSubBaseType _ _ _ _ = False
 
 isSubType :: Set VarID -> Set NormalizedConstraint -> SType -> SType -> Bool
-isSubType vphi phi (BaseST b) (BaseST b') = isSubBaseType vphi phi b b'
+isSubType vphi phi (NatST ixI ixJ) (NatST ixI' ixJ') = checkJudgements vphi phi (ixI' :<=: ixI) && checkJudgements vphi phi (ixJ :<=: ixJ')
 isSubType vphi phi (ServST ixI is ixK ts sigma) (ServST ixJ js ixK' ts' sigma')
   -- (SS-sinvar)
   | ixI == ixJ && is == js && sigma == sigma' && sigma' == inOutCapa =
@@ -201,31 +175,19 @@ checkExp :: Set VarID -> Set NormalizedConstraint -> Map Var SType -> Exp -> Che
 -- (S-zero)
 checkExp _ _ _ exp@ZeroE =
   inContext "(S-zero)" [("exp", show exp)] $
-    return $ BaseST (NatBT zeroIndex zeroIndex)
+    return $ NatST zeroIndex zeroIndex
 --
 -- (S-succ)
 checkExp vphi phi gamma exp@(SuccE e) =
   inContext "(S-succ)" [("exp", show exp)] $ do
-    (BaseST (NatBT ixI ixJ)) <- checkExp vphi phi gamma e
-    return $ BaseST (NatBT (ixI .+. oneIndex) (ixJ .+. oneIndex))
+    NatST ixI ixJ <- checkExp vphi phi gamma e
+    return $ NatST (ixI .+. oneIndex) (ixJ .+. oneIndex)
 --
 -- (S-var)
 checkExp _ _ gamma exp@(VarE v) =
   inContext "(S-var)" [("exp", show exp)] $
     Map.lookup v gamma `failWith` "unbound variable"
---
--- (S-empty)
-checkExp _ _ _ exp@(ListE []) =
-  inContext "(S-empty)" [("exp", show exp)] $
-    return $ BaseST (ListBT zeroIndex zeroIndex defaultBaseType)
---
--- (S-cons)
-checkExp vphi phi gamma exp@(ListE (e : e')) =
-  inContext "(S-cons)" [("exp", show exp), ("vphi", show vphi), ("phi", show phi)] $ do
-    (BaseST b) <- checkExp vphi phi gamma e
-    (BaseST (ListBT ixI ixJ b')) <- checkExp vphi phi gamma (ListE e')
-    bJoined <- baseJoin vphi phi b b'
-    return $ BaseST (ListBT (ixI .+. oneIndex) (ixJ .+. oneIndex) bJoined)
+
 
 checkExps :: Set VarID -> Set NormalizedConstraint -> Map Var SType -> [Exp] -> Check [SType]
 checkExps vphi phi gamma = mapM (checkExp vphi phi gamma)
@@ -326,30 +288,17 @@ checkProc vphi phi gamma pro@(p :|: q) =
 -- (S-nmatch)
 checkProc vphi phi gamma pro@(MatchNatP e p x q) =
   inContext "(S-nmatch)" [("process", show pro), ("vphi", show vphi), ("phi", show phi)] $ do
-    BaseST (NatBT ixI ixJ) <- checkExp vphi phi gamma e
+    NatST ixI ixJ <- checkExp vphi phi gamma e
     k <- checkProc vphi (phi `Set.union` normalizeConstraint (ixI :<=: zeroIndex)) gamma p
     ixI' <- safeIndexSubtraction vphi (phi `Set.union` normalizeConstraint (ixJ :>=: oneIndex)) ixI oneIndex
     ixJ' <- safeIndexSubtraction vphi (phi `Set.union` normalizeConstraint (ixJ :>=: oneIndex)) ixJ oneIndex
-    k' <- checkProc vphi (phi `Set.union` normalizeConstraint (ixJ :>=: oneIndex)) (gamma `Map.union` Map.singleton x (BaseST (NatBT ixI' ixJ'))) q
+    k' <- checkProc vphi (phi `Set.union` normalizeConstraint (ixJ :>=: oneIndex)) (gamma `Map.union` Map.singleton x (NatST ixI' ixJ')) q
     let l
           | checkJudgements vphi phi (k' :<=: k) = k
           | checkJudgements vphi phi (k :<=: k') = k'
           | otherwise = k .+. k'
     return l
---
--- (S-lmatch)
-checkProc vphi phi gamma pro@(MatchListP e p x y q) =
-  inContext "(S-lmatch)" [("process", show pro), ("vphi", show vphi), ("phi", show phi)] $ do
-    BaseST (ListBT ixI ixJ b) <- checkExp vphi phi gamma e
-    k <- checkProc vphi (phi `Set.union` normalizeConstraint (ixI :<=: zeroIndex)) gamma p
-    ixI' <- safeIndexSubtraction vphi (phi `Set.union` normalizeConstraint (ixJ :>=: oneIndex)) ixI oneIndex
-    ixJ' <- safeIndexSubtraction vphi (phi `Set.union` normalizeConstraint (ixJ :>=: oneIndex)) ixJ oneIndex
-    k' <- checkProc vphi (phi `Set.union` normalizeConstraint (ixJ :>=: oneIndex)) (gamma `Map.union` Map.fromList [(x, BaseST b), (y, BaseST (ListBT ixI' ixJ' b))]) q
-    let l
-          | checkJudgements vphi phi (k' :<=: k) = k
-          | checkJudgements vphi phi (k :<=: k') = k'
-          | otherwise = k .+. k'
-    return l
+
 checkProc _ _ _ pro = inContext "invalid process" [("process", show pro)] $ returnError "No valid type rule"
 
 evalCheck :: Check a -> Either String a

@@ -1,6 +1,5 @@
 module SType
   ( SType (..),
-    BType (..),
     IOCapability (..),
     SType.substituteVars,
   )
@@ -11,22 +10,15 @@ import Index (NormalizedIndex (..), Subst, VarID, substituteVars)
 
 data IOCapability = InputC | OutputC deriving (Eq, Ord, Show)
 
-data BType
-  = NatBT NormalizedIndex NormalizedIndex
-  | ListBT NormalizedIndex NormalizedIndex BType
-  deriving (Show)
-
 data SType
-  = BaseST BType
+  = NatST NormalizedIndex NormalizedIndex
   | ChST NormalizedIndex [SType] (Set IOCapability)
   | ServST NormalizedIndex [VarID] NormalizedIndex [SType] (Set IOCapability)
+  | LockedServST NormalizedIndex [VarID] NormalizedIndex [SType] (Set IOCapability) NormalizedIndex
   deriving (Show)
 
 substituteVars :: SType -> Subst -> SType
-substituteVars (BaseST bType) subst = BaseST (substituteVarsB bType subst)
+substituteVars (NatST ixI ixJ) subst = NatST (Index.substituteVars ixI subst) (Index.substituteVars ixJ subst)
 substituteVars (ChST ixI ts cap) subst = ChST (Index.substituteVars ixI subst) (Prelude.map (`SType.substituteVars` subst) ts) cap
-substituteVars (ServST ixI is k ts cap) subst = ServST (Index.substituteVars ixI subst) is (Index.substituteVars k subst) (Prelude.map (`SType.substituteVars` subst) ts) cap
-
-substituteVarsB :: BType -> Subst -> BType
-substituteVarsB (NatBT ixI ixJ) subst = NatBT (Index.substituteVars ixI subst) (Index.substituteVars ixJ subst)
-substituteVarsB (ListBT ixI ixJ bt) subst = ListBT (Index.substituteVars ixI subst) (Index.substituteVars ixJ subst) (substituteVarsB bt subst)
+substituteVars (ServST ixI is ixK ts cap) subst = ServST (Index.substituteVars ixI subst) is (Index.substituteVars ixK subst) (Prelude.map (`SType.substituteVars` subst) ts) cap
+substituteVars (LockedServST ixI is ixK ts cap ixJ) subst = LockedServST (Index.substituteVars ixI subst) is (Index.substituteVars ixK subst) (Prelude.map (`SType.substituteVars` subst) ts) cap (Index.substituteVars ixJ subst)
