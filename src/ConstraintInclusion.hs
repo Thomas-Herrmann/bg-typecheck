@@ -1,6 +1,7 @@
 module ConstraintInclusion
   ( constraintsInclude,
     constraintsInclude',
+    constraintsIncludeZ3,
     findConical,
     generateUnivariateConstraints,
     generateUnivariateConstraint,
@@ -10,10 +11,11 @@ where
 
 import Conduit
 import Constraint (Constraint ((:<=:)), NormalizedConstraint (NormalizedConstraint), invertConstraint, isUnivariate, maxIndexVar)
-import Control.Monad (replicateM, when)
+import Control.Monad (foldM, replicateM, when)
 import Control.Monad.ST
 import Data.Array
 import Data.Complex (Complex ((:+)))
+import Data.Functor
 import Data.Map as Map hiding (notMember)
 import Data.Maybe
 import Data.MultiSet as MultiSet
@@ -26,8 +28,71 @@ import Numeric.Optimization.MIP.Base (def)
 import Polynomial.Roots (roots)
 import ToySolver.Arith.Simplex
 import qualified ToySolver.Data.LA as LA
+import Z3.Monad
 
 type VectorizedConstraint = [Double]
+
+constraintsIncludeZ3 :: Set NormalizedConstraint -> Constraint -> IO Bool
+constraintsIncludeZ3 phi constraint = do
+  bs <- mapM (evalZ3 . constraintsIncludeZ3' phi') (Set.toList normalizedConstraint)
+  return $ and bs
+  where
+    normalizedConstraint = normalizeConstraint constraint
+    phi' = Set.delete (NormalizedConstraint Map.empty) phi
+
+constraintsIncludeZ3' :: Set NormalizedConstraint -> NormalizedConstraint -> Z3 Bool
+constraintsIncludeZ3' phi constraint = do
+  solveZ3 vphi phiWInvert
+  where
+    invConstraint = invertConstraint constraint
+    linearizedPhi = Set.foldr Set.union Set.empty (Set.map generateUnivariateConstraints phi) -- Create linear constraints from polynomial constraints
+    phiWInvert = Set.insert invConstraint (phi `Set.union` linearizedPhi)
+    vphi = allMonomials (Set.insert invConstraint phiWInvert) -- Find vphi consisting of all index variables in phi
+
+solveZ3 :: Set (MultiSet VarID) -> Set NormalizedConstraint -> Z3 Bool
+solveZ3 vphi phi = do
+  astCons <- mapM normalizedConstraintToZ3 (Set.toList phi)
+  mapM_ assert astCons
+  res <- Z3.Monad.check
+  case res of
+    Z3.Monad.Unsat -> return True
+    _ -> return False
+
+normalizedConstraintToZ3 :: NormalizedConstraint -> Z3 AST
+normalizedConstraintToZ3 (NormalizedConstraint ix) = do
+  _0 <- mkIntNum 0
+  ast1 <- normalizedIndexToZ3 ix
+  mkLe ast1 _0
+
+normalizedIndexToZ3 :: NormalizedIndex -> Z3 AST
+normalizedIndexToZ3 ix = do
+  let ps = Map.assocs ix
+  _0 <- mkIntNum 0
+  foldM ffunc _0 ps
+  where
+    ffunc acc (m, c) = do
+      ast1 <- monomialToZ3 m
+      ast2 <- coefficientToZ3 c
+      ast3 <- mkMul [ast1, ast2]
+      mkAdd [acc, ast3]
+
+monomialToZ3 :: Monomial -> Z3 AST
+monomialToZ3 m = do
+  _1 <- mkIntNum 1
+  foldM ffunc _1 m
+  where
+    ffunc :: AST -> VarID -> Z3 AST
+    ffunc acc v = do
+      ast <- varIDToZ3 v
+      mkMul [ast, acc]
+
+varIDToZ3 :: VarID -> Z3 AST
+varIDToZ3 v = do
+  sym <- mkIntSymbol v
+  mkIntVar sym
+
+coefficientToZ3 :: Double -> Z3 AST
+coefficientToZ3 = mkRealNum
 
 constraintsInclude :: Set NormalizedConstraint -> Constraint -> Bool
 constraintsInclude phi constraint = Prelude.foldr ((&&) . constraintsInclude' phi') True normalizedConstraint
@@ -40,7 +105,7 @@ constraintsInclude' phi constraint =
   triviallySatisfied constraint
     || ( not (triviallyNotSatisfied constraint)
            && case solveSimplexToy vphi phiWInvert of
-             Unsat -> True
+             ToySolver.Arith.Simplex.Unsat -> True
              val -> False
        )
   where

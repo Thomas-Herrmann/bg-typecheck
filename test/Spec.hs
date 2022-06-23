@@ -29,6 +29,19 @@ constraintInclusionSpec = describe "constraintInclusion" $ do
   -- Example 3.3.3 in the paper
   it "should check constraint judgement {i, j, k};{3i - 3 <= 0, 1j + 2k - 2 <= 0, -1k <= 0} |= i + j - 3 <= 0" $ do
     constraintsInclude (Set.fold Set.union Set.empty $ Set.fromList [c1, c2, c3]) cnew `shouldBe` True
+
+constraintInclusionZ3Spec = describe "constraintInclusionZ3" $ do
+  it "[Z3] should invert constraint i >= 5 to i - 4 <= 0" $ do
+    constraintsIncludeZ3 (Set.fromList [normSingle (monIndex iM 1 :<=: nIndex 5)]) (monIndex iM 1 .+. nIndex (-5) :<=: zeroIndex)
+      `shouldReturn` True
+  it "[Z3] should NOT verify constraint judgement {i};{} |= {i - 5 <= 0}" $ do
+    constraintsIncludeZ3 Set.empty (monIndex iM 1 .+. nIndex (-5) :<=: zeroIndex)
+      `shouldReturn` False
+  -- Example 3.3.3 in the paper
+  it "[Z3] should check constraint judgement {i, j, k};{3i - 3 <= 0, 1j + 2k - 2 <= 0, -1k <= 0} |= i + j - 3 <= 0" $ do
+    constraintsIncludeZ3 (Set.fold Set.union Set.empty $ Set.fromList [c1, c2, c3]) cnew `shouldReturn` True
+
+typeCheckSpec = describe "typeCheck" $ do
   -- Example 3.3.2 in the paper
   it "should check add process" $ do
     checkProcess Set.empty Set.empty addProcGamma addProc `shouldBe` Right zeroIndex
@@ -39,6 +52,8 @@ constraintInclusionSpec = describe "constraintInclusion" $ do
 main :: IO ()
 main = do
   hspec constraintInclusionSpec
+  hspec constraintInclusionZ3Spec
+  hspec typeCheckSpec
 
 i : j : k : l : m : n : o : rest = [0 ..]
 

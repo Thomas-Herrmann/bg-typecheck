@@ -51,6 +51,7 @@ library
     , toysolver
     , MIP
     , conduit
+    , z3
   default-language: Haskell2010
 
 executable p10-exe
