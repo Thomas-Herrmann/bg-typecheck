@@ -52,6 +52,7 @@ library
     , MIP
     , conduit
     , z3
+    , transformers
   default-language: Haskell2010
 
 executable p10-exe

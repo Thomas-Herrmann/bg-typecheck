@@ -7,7 +7,7 @@ where
 
 import Constraint (Constraint (..), NormalizedConstraint (..))
 import ConstraintInclusion (constraintsInclude)
-import Control.Monad.Except
+import Control.Monad.Trans.Except
 import Control.Monad.State.Lazy
 import qualified Data.Functor
 import Data.Map as Map
@@ -21,21 +21,19 @@ newtype CheckState = CheckState
   { stack :: [(String, [(String, String)])]
   }
 
-type Check a = StateT CheckState (Either (CheckState, String)) a
+type Check a = ExceptT (CheckState, String) (StateT CheckState IO) a
 
-instance MonadFail (Either (CheckState, String)) where
-  fail s = Left (CheckState [], s)
 
 failWith :: Maybe a -> String -> Check a
 failWith (Just val) msg = return val
 failWith Nothing msg = do
   s <- get
-  throwError (s, msg)
+  throwE (s, msg)
 
 returnError :: String -> Check a
 returnError msg = do
   s <- get
-  throwError (s, msg)
+  throwE (s, msg)
 
 inContext :: String -> [(String, String)] -> Check a -> Check a
 inContext name bindings action = do
@@ -70,6 +68,9 @@ advance vphi phi ixI (ServST ixJ is k ts sigma)
     ix' <- safeIndexSubtraction vphi phi ixI ixJ
     return $ ServST ix' is k ts (sigma `Set.intersection` Set.singleton OutputC)
   | otherwise = return $ LockedServST ixJ is k ts sigma ixI
+advance vphi phi ixI (LockedServST ixJ is k ts sigma ixL)
+  | checkJudgements vphi phi ((ixL .+. ixI) :>=: ixJ) = return $ ServST zeroIndex is k ts sigma
+  | otherwise = return $ LockedServST ixJ is k ts sigma (ixL .+. ixI)
 
 advanceContext :: Set VarID -> Set NormalizedConstraint -> NormalizedIndex -> Context -> Check Context
 advanceContext vphi phi ix g = sequence (Map.map (advance vphi phi ix) g)
@@ -301,23 +302,25 @@ checkProc vphi phi gamma pro@(MatchNatP e p x q) =
 
 checkProc _ _ _ pro = inContext "invalid process" [("process", show pro)] $ returnError "No valid type rule"
 
-evalCheck :: Check a -> Either String a
-evalCheck c = case evalStateT c (CheckState {stack = []}) of
-  Left (CheckState s, msg) ->
-    Left $
-      "Error during process check: " ++ msg ++ "\n"
-        ++ "StackTrace: "
-        ++ show (Prelude.map fst s)
-        ++ "\n"
-        ++ "Relevant bindings: "
-        ++ (if not (Prelude.null s) then (showBindings . snd . head) s else "Invalid")
-        ++ "Relevant bindings 2: "
-        ++ (if Prelude.length s >= 2 then (showBindings . snd . head . tail) s else "Invalid")
-        ++ "Relevant bindings 3: "
-        ++ (if Prelude.length s >= 3 then (showBindings . snd . head . tail . tail) s else "Invalid")
-  Right k -> Right k
+evalCheck :: Check a -> IO (Either String a)
+evalCheck m = do
+  m' <- evalStateT (runExceptT m) (CheckState {stack = []})
+  case m' of
+    Left (CheckState s, msg) -> return $
+      Left 
+        ("Error during process check: " ++ msg ++ "\n"
+          ++ "StackTrace: "
+          ++ show (Prelude.map fst s)
+          ++ "\n"
+          ++ "Relevant bindings: "
+          ++ (if not (Prelude.null s) then (showBindings . snd . head) s else "Invalid")
+          ++ "Relevant bindings 2: "
+          ++ (if Prelude.length s >= 2 then (showBindings . snd . head . tail) s else "Invalid")
+          ++ "Relevant bindings 3: "
+          ++ (if Prelude.length s >= 3 then (showBindings . snd . head . tail . tail) s else "Invalid"))
+    Right k -> return $ Right k
   where
     showBindings bindings = "\n" ++ Prelude.foldr (\(var, t) acc -> "  " ++ var ++ " : " ++ t ++ "\n" ++ acc) "" bindings
 
-checkProcess :: Set VarID -> Set NormalizedConstraint -> Map Var SType -> Proc -> Either String NormalizedIndex
+checkProcess :: Set VarID -> Set NormalizedConstraint -> Map Var SType -> Proc -> IO (Either String NormalizedIndex)
 checkProcess vphi phi gamma p = evalCheck $ checkProc vphi phi gamma p
