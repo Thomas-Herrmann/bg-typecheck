@@ -6,7 +6,7 @@ module STypeCheck
 where
 
 import Constraint (Constraint (..), NormalizedConstraint (..))
-import ConstraintInclusion (constraintsInclude)
+import ConstraintInclusion (constraintsIncludeZ3)
 import Control.Monad.Trans.Except
 import Control.Monad.State.Lazy
 import qualified Data.Functor
@@ -16,6 +16,8 @@ import Index (NormalizedIndex, Subst, VarID, equalsConstant, evaluate, oneIndex,
 import Normalization (normalizeConstraint, normalizeIndex)
 import PiCalculus (Exp (..), Proc (..), Var)
 import SType (IOCapability (..), SType (..), substituteVars)
+import Control.Monad.IO.Class (liftIO)
+import Control.Monad.Extra (ifM, unlessM)
 
 newtype CheckState = CheckState
   { stack :: [(String, [(String, String)])]
@@ -50,8 +52,8 @@ inCapa = Set.singleton InputC
 
 outCapa = Set.singleton OutputC
 
-checkJudgements :: Set VarID -> Set NormalizedConstraint -> Constraint -> Bool
-checkJudgements vphi = constraintsInclude
+checkJudgements :: Set VarID -> Set NormalizedConstraint -> Constraint -> Check Bool
+checkJudgements vphi phi c = liftIO $ constraintsIncludeZ3 phi c -- todo use vphi ..
 
 joinIndexVariables :: Set VarID -> Set VarID -> Set VarID
 joinIndexVariables = Set.union -- for the multivariate implementation
@@ -59,38 +61,45 @@ joinIndexVariables = Set.union -- for the multivariate implementation
 
 advance :: Set VarID -> Set NormalizedConstraint -> NormalizedIndex -> SType -> Check SType
 advance _ _ _ t@(NatST _ _) = return t
-advance vphi phi ixI (ChST ixJ ts sigma)
-  | checkJudgements vphi phi (ixJ :>=: ixI) = return $ ChST (ixJ .-. ixI) ts sigma
-  | otherwise = return $ ChST zeroIndex ts Set.empty
-advance vphi phi ixI (ServST ixJ is k ts sigma)
-  | checkJudgements vphi phi (ixJ :>=: ixI) = return $ ServST (ixJ .-. ixI) is k ts sigma
-  | checkJudgements vphi phi (ixI :>=: ixJ) = do
-    ix' <- safeIndexSubtraction vphi phi ixI ixJ
-    return $ ServST ix' is k ts (sigma `Set.intersection` Set.singleton OutputC)
-  | otherwise = return $ LockedServST ixJ is k ts sigma ixI
-advance vphi phi ixI (LockedServST ixJ is k ts sigma ixL)
-  | checkJudgements vphi phi ((ixL .+. ixI) :>=: ixJ) = return $ ServST zeroIndex is k ts sigma
-  | otherwise = return $ LockedServST ixJ is k ts sigma (ixL .+. ixI)
+advance vphi phi ixI (ChST ixJ ts sigma) =
+  ifM (checkJudgements vphi phi (ixJ :>=: ixI))
+    (return $ ChST (ixJ .-. ixI) ts sigma)
+    (return $ ChST zeroIndex ts Set.empty)
+
+advance vphi phi ixI (ServST ixJ is k ts sigma) =
+  ifM (checkJudgements vphi phi (ixJ :>=: ixI))
+    (return $ ServST (ixJ .-. ixI) is k ts sigma)
+    (ifM (checkJudgements vphi phi (ixI :>=: ixJ))
+      (safeIndexSubtraction vphi phi ixI ixJ >>= (\ix' -> return $ ServST ix' is k ts (sigma `Set.intersection` Set.singleton OutputC)))
+      (return $ LockedServST ixJ is k ts sigma ixI))
+
+advance vphi phi ixI (LockedServST ixJ is k ts sigma ixL) =
+  ifM (checkJudgements vphi phi ((ixL .+. ixI) :>=: ixJ))
+    (return $ ServST zeroIndex is k ts sigma)
+    (return $ LockedServST ixJ is k ts sigma (ixL .+. ixI))
+
 
 advanceContext :: Set VarID -> Set NormalizedConstraint -> NormalizedIndex -> Context -> Check Context
 advanceContext vphi phi ix g = sequence (Map.map (advance vphi phi ix) g)
 
 
-ready :: Set VarID -> Set NormalizedConstraint -> Context -> Context
-ready vphi phi = Map.foldrWithKey filterMap Map.empty
+ready :: Set VarID -> Set NormalizedConstraint -> Context -> Check Context
+ready vphi phi = Map.foldrWithKey filterMap (return Map.empty)
   where
-    filterMap v t@(NatST _ _) gamma = Map.insert v t gamma
-    filterMap v (ServST ixI is k ts sigma) gamma
-      | checkJudgements vphi phi (ixI :<=: zeroIndex) =
-        Map.insert v (ServST ixI is k ts (sigma `Set.intersection` Set.singleton OutputC)) gamma
-    filterMap _ _ gamma = gamma
+    filterMap v t@(NatST _ _) mgamma = mgamma >>= (\gamma -> return $ Map.insert v t gamma)
+    filterMap v (ServST ixI is k ts sigma) mgamma = do
+      gamma <- mgamma
+      ifM (checkJudgements vphi phi (ixI :<=: zeroIndex))
+        (return $ Map.insert v (ServST ixI is k ts (sigma `Set.intersection` Set.singleton OutputC)) gamma)
+        (return $ gamma)
 
-isSubTypeList :: Set VarID -> Set NormalizedConstraint -> [SType] -> [SType] -> Bool
+    filterMap _ _ mgamma = mgamma
+
+isSubTypeList :: Set VarID -> Set NormalizedConstraint -> [SType] -> [SType] -> Check Bool
 isSubTypeList vphi phi ts ts' =
-  length ts == length ts'
-    && Prelude.foldr (\(t', t) b -> b && isSubType vphi phi t' t) True (Prelude.zip ts' ts)
-
-
+  if length ts == length ts'
+    then foldM (\b (t', t) -> isSubType vphi phi t' t >>= (\b' -> return $ b && b')) True (Prelude.zip ts' ts)
+    else return False
 
 instantiate :: [VarID] -> [SType] -> Check Subst
 instantiate vars types =
@@ -118,52 +127,64 @@ instantiateSingle (i : j : k) (ServST ixI _ kc ts sigma) = do
 instantiateSingle vars typ = returnError $ "instantiateSingle fail: " ++ "vars = " ++ show vars ++ ", typ = " ++ show typ
 
 
-isSubType :: Set VarID -> Set NormalizedConstraint -> SType -> SType -> Bool
-isSubType vphi phi (NatST ixI ixJ) (NatST ixI' ixJ') = checkJudgements vphi phi (ixI' :<=: ixI) && checkJudgements vphi phi (ixJ :<=: ixJ')
+isSubType :: Set VarID -> Set NormalizedConstraint -> SType -> SType -> Check Bool
+isSubType vphi phi (NatST ixI ixJ) (NatST ixI' ixJ') = do
+   b <- checkJudgements vphi phi (ixI' :<=: ixI)
+   b' <- checkJudgements vphi phi (ixJ :<=: ixJ')
+   return $ b && b'
+
 isSubType vphi phi (ServST ixI is ixK ts sigma) (ServST ixJ js ixK' ts' sigma')
   -- (SS-sinvar)
-  | ixI == ixJ && is == js && sigma == sigma' && sigma' == inOutCapa =
-    isSubTypeList vphi' phi ts ts'
-      && isSubTypeList vphi' phi ts' ts
-      && checkJudgements vphi' phi (ixK :=: ixK')
+  | ixI == ixJ && is == js && sigma == sigma' && sigma' == inOutCapa = do
+    b <- isSubTypeList vphi' phi ts ts'
+    b' <- isSubTypeList vphi' phi ts' ts
+    b'' <- checkJudgements vphi' phi (ixK :=: ixK')
+    return $ b && b' && b''
+
   -- (SS-scovar)
-  | ixI == ixJ && is == js && inCapa `Set.isSubsetOf` sigma && sigma' == inCapa =
-    isSubTypeList vphi' phi ts ts'
-      && checkJudgements vphi' phi (ixK' :<=: ixK)
+  | ixI == ixJ && is == js && inCapa `Set.isSubsetOf` sigma && sigma' == inCapa = do
+    b <- isSubTypeList vphi' phi ts ts'
+    b' <- checkJudgements vphi' phi (ixK' :<=: ixK)
+    return $ b && b'
+
   -- (SS-scontra)
-  | ixI == ixJ && is == js && outCapa `Set.isSubsetOf` sigma && sigma' == outCapa =
-    isSubTypeList vphi' phi ts' ts
-      && checkJudgements vphi' phi (ixK :<=: ixK')
+  | ixI == ixJ && is == js && outCapa `Set.isSubsetOf` sigma && sigma' == outCapa = do
+    b <- isSubTypeList vphi' phi ts' ts
+    b' <- checkJudgements vphi' phi (ixK :<=: ixK')
+    return $ b && b'
+
   -- (SS-srelax)
-  | ixI == ixJ && is == js =
-    (sigma' `isSubsetOf` sigma)
-      && isSubType vphi phi (ServST ixI is ixK ts sigma') (ServST ixJ js ixK' ts' sigma')
+  | ixI == ixJ && is == js = do
+    b <- isSubType vphi phi (ServST ixI is ixK ts sigma') (ServST ixJ js ixK' ts' sigma')
+    return $ b && (sigma' `isSubsetOf` sigma)
   where
     vphi' = joinIndexVariables vphi $ Set.fromList is
+
 isSubType vphi phi (ChST ixI ts sigma) (ChST ixJ ts' sigma')
   -- (SS-cinvar)
-  | ixI == ixJ && sigma == sigma' && sigma' == inOutCapa =
-    isSubTypeList vphi phi ts ts'
-      && isSubTypeList vphi phi ts' ts
+  | ixI == ixJ && sigma == sigma' && sigma' == inOutCapa = do
+    b <- isSubTypeList vphi phi ts ts'
+    b' <- isSubTypeList vphi phi ts' ts
+    return $ b && b'
+
   -- (SS-ccovar)
-  | ixI == ixJ && inCapa `Set.isSubsetOf` sigma && sigma' == inCapa =
-    isSubTypeList vphi phi ts ts'
+  | ixI == ixJ && inCapa `Set.isSubsetOf` sigma && sigma' == inCapa = isSubTypeList vphi phi ts ts'
   -- (SS-ccontra)
-  | ixI == ixJ && outCapa `Set.isSubsetOf` sigma && sigma' == outCapa =
-    isSubTypeList vphi phi ts' ts
+  | ixI == ixJ && outCapa `Set.isSubsetOf` sigma && sigma' == outCapa = isSubTypeList vphi phi ts' ts
   -- (SS-crelax)
-  | ixI == ixJ =
-    (sigma' `isSubsetOf` sigma)
-      && isSubType vphi phi (ChST ixI ts sigma') (ChST ixJ ts' sigma')
-isSubType _ _ _ _ = False
+  | ixI == ixJ = do
+    b <- isSubType vphi phi (ChST ixI ts sigma') (ChST ixJ ts' sigma')
+    return $ b && (sigma' `isSubsetOf` sigma)
+    
+isSubType _ _ _ _ = return False
 
 -- Pair-wise sub-type checking
-isSubTypes :: Set VarID -> Set NormalizedConstraint -> [SType] -> [SType] -> Bool
-isSubTypes vphi phi t1s t2s = Prelude.foldr (\(t1, t2) res -> res && isSubType vphi phi t1 t2) True (zip t1s t2s)
+isSubTypes :: Set VarID -> Set NormalizedConstraint -> [SType] -> [SType] -> Check Bool
+isSubTypes vphi phi t1s t2s = foldM (\b (t1, t2) -> isSubType vphi phi t1 t2 >>= (\b' -> return $ b && b')) True (zip t1s t2s)
 
 checkSubType :: Set VarID -> Set NormalizedConstraint -> SType -> SType -> Check ()
-checkSubType vphi phi t1 t2 = do
-  unless (isSubType vphi phi t1 t2) $
+checkSubType vphi phi t1 t2 =
+  unlessM (isSubType vphi phi t1 t2) $
     inContext "checkSubType" [("T", show t1), ("S", show t2)] $
       returnError "Failed subtype check T <= S"
 
@@ -214,7 +235,9 @@ isServer gamma a =
 safeIndexSubtraction :: Set VarID -> Set NormalizedConstraint -> NormalizedIndex -> NormalizedIndex -> Check NormalizedIndex
 safeIndexSubtraction vphi phi ixI ixJ =
   inContext "safeIndexSubtraction" [("ixI", show ixI), ("ixJ", show ixJ), ("phi", show phi)] $ do
-    case (checkJudgements vphi phi (ixI :>=: ixJ), checkJudgements vphi phi (ixI :<=: zeroIndex)) of
+    b <- checkJudgements vphi phi (ixI :>=: ixJ)
+    b' <- checkJudgements vphi phi (ixI :<=: zeroIndex)
+    case (b, b') of
       (True, _) -> return (ixI .-. ixJ)
       (_, True) -> return zeroIndex
       _ -> returnError "Failed index subtraction ixI - ixJ"
@@ -268,21 +291,23 @@ checkProc vphi phi gamma pro@(RepInputP a vs p) | hasInputCapability a gamma =
   inContext "(S-iserv)" [("process", show pro), ("vphi", show vphi), ("phi", show phi)] $ do
     (ServST ixI is k ts cap) <- Map.lookup a gamma `failWith` "unbound variable"
     gammaA <- advanceContext vphi phi ixI gamma
-    let gammaAR = ready vphi phi gammaA
+    gammaAR <- ready vphi phi gammaA
     let gammaAR' = gammaAR `Map.union` Map.singleton a (ServST zeroIndex is k ts outCapa) `Map.union` Map.fromList (zip vs ts)
     k' <- checkProc vphi phi gammaAR' p
-    if checkJudgements (vphi `joinIndexVariables` Set.fromList is) phi (k' :<=: k)
-      then return ixI
-      else returnError "Judgement failed"
+    ifM (checkJudgements (vphi `joinIndexVariables` Set.fromList is) phi (k' :<=: k))
+      (return ixI)
+      (returnError "Judgement failed")
 --
 -- (S-par)
 checkProc vphi phi gamma pro@(p :|: q) =
   inContext "(S-par)" [("process", show pro), ("vphi", show vphi), ("phi", show phi)] $ do
     k <- checkProc vphi phi gamma p
     k' <- checkProc vphi phi gamma q
+    kgreater <- checkJudgements vphi phi (k' :<=: k)
+    ksmaller <- checkJudgements vphi phi (k :<=: k')
     let l
-          | checkJudgements vphi phi (k' :<=: k) = k
-          | checkJudgements vphi phi (k :<=: k') = k'
+          | kgreater = k
+          | ksmaller = k'
           | otherwise = k .+. k'
     return l
 --
@@ -294,9 +319,11 @@ checkProc vphi phi gamma pro@(MatchNatP e p x q) =
     ixI' <- safeIndexSubtraction vphi (phi `Set.union` normalizeConstraint (ixJ :>=: oneIndex)) ixI oneIndex
     ixJ' <- safeIndexSubtraction vphi (phi `Set.union` normalizeConstraint (ixJ :>=: oneIndex)) ixJ oneIndex
     k' <- checkProc vphi (phi `Set.union` normalizeConstraint (ixJ :>=: oneIndex)) (gamma `Map.union` Map.singleton x (NatST ixI' ixJ')) q
+    kgreater <- checkJudgements vphi phi (k' :<=: k)
+    ksmaller <- checkJudgements vphi phi (k :<=: k')
     let l
-          | checkJudgements vphi phi (k' :<=: k) = k
-          | checkJudgements vphi phi (k :<=: k') = k'
+          | kgreater = k
+          | ksmaller = k'
           | otherwise = k .+. k'
     return l
 

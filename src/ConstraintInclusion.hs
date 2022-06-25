@@ -47,7 +47,7 @@ constraintsIncludeZ3' phi constraint = do
     invConstraint = invertConstraint constraint
     linearizedPhi = Set.foldr Set.union Set.empty (Set.map generateUnivariateConstraints phi) -- Create linear constraints from polynomial constraints
     phiWInvert = Set.insert invConstraint (phi `Set.union` linearizedPhi)
-    vphi = allMonomials (Set.insert invConstraint phiWInvert) -- Find vphi consisting of all index variables in phi
+    vphi = allMonomials phiWInvert -- Find vphi consisting of all index variables in phi
 
 solveZ3 :: Set (MultiSet VarID) -> Set NormalizedConstraint -> Z3 Bool
 solveZ3 vphi phi = do
