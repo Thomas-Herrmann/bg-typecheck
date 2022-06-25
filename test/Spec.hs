@@ -42,19 +42,19 @@ constraintInclusionZ3Spec = describe "constraintInclusionZ3" $ do
   it "[Z3] should check constraint judgement {i, j, k};{3i - 3 <= 0, 1j + 2k - 2 <= 0, -1k <= 0} |= i + j - 3 <= 0" $ do
     constraintsIncludeZ3 (Set.fold Set.union Set.empty $ Set.fromList [c1, c2, c3]) cnew `shouldReturn` True
 
---typeCheckSpec = describe "typeCheck" $ do
+typeCheckSpec = describe "typeCheck" $ do
   -- Example 3.3.2 in the paper
---  it "should check add process" $ do
---    checkProcess Set.empty Set.empty addProcGamma addProc `shouldBe` (return $ Right zeroIndex)
+  it "should check add process" $ do
+    checkProcess Set.empty Set.empty addProcGamma addProc `shouldReturn` (Right zeroIndex)
   -- Example 3.3.2 in the paper
---  it "should check called add process" $ do
---    checkProcess Set.empty Set.empty addProcGamma proc1 `shouldBe` (return $ Right zeroIndex)
+  it "should check called add process" $ do
+    checkProcess Set.empty Set.empty addProcGamma proc1 `shouldReturn` (Right zeroIndex)
 
 main :: IO ()
 main = do
   hspec constraintInclusionSpec
   hspec constraintInclusionZ3Spec
- -- hspec typeCheckSpec
+  hspec typeCheckSpec
 
 i : j : k : l : m : n : o : rest = [0 ..]
 
