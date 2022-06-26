@@ -53,6 +53,7 @@ solveZ3 :: Set (MultiSet VarID) -> Set NormalizedConstraint -> Z3 Bool
 solveZ3 vphi phi = do
   astCons <- mapM normalizedConstraintToZ3 (Set.toList phi)
   mapM_ assert astCons
+
   res <- Z3.Monad.check
   case res of
     Z3.Monad.Unsat -> return True
@@ -88,8 +89,11 @@ monomialToZ3 m = do
 
 varIDToZ3 :: VarID -> Z3 AST
 varIDToZ3 v = do
+  _0 <- mkIntNum 0
   sym <- mkIntSymbol v
-  mkIntVar sym
+  var <- mkIntVar sym
+  assert =<< mkGe var _0
+  return var
 
 coefficientToZ3 :: Double -> Z3 AST
 coefficientToZ3 = mkRealNum

@@ -45,10 +45,10 @@ constraintInclusionZ3Spec = describe "constraintInclusionZ3" $ do
 typeCheckSpec = describe "typeCheck" $ do
   -- Example 3.3.2 in the paper
   it "should check add process" $ do
-    checkProcess Set.empty Set.empty addProcGamma addProc `shouldReturn` (Right zeroIndex)
+    checkProcess Set.empty Set.empty addProcGamma addProc `shouldReturn` Right zeroIndex
   -- Example 3.3.2 in the paper
   it "should check called add process" $ do
-    checkProcess Set.empty Set.empty addProcGamma proc1 `shouldReturn` (Right zeroIndex)
+    checkProcess Set.empty Set.empty addProcGamma proc1 `shouldReturn` Right (nIndex 10)
 
 main :: IO ()
 main = do
@@ -75,7 +75,7 @@ proc1 =
     :|: RestrictP
       "r"
       (ChST (nIndex 10) [NatST (nIndex 15) (nIndex 15)] inOutCap)
-      (OutputP "add" [natExp 10, natExp 5, VarE "r"] :|: nTick 9 (InputP "r" ["v"] NilP))
+      (OutputP "add" [natExp 10, natExp 5, VarE "r"] :|: InputP "r" ["v"] NilP)
 
 -- !add(x, y, r).match x {0 -> r<y>; succ(z) -> tick.add<z, succ(yp), r>}
 addProc =
