@@ -23,7 +23,6 @@ nTick n p = nTick (n - 1) (TickP p)
 data Exp
   = ZeroE
   | SuccE Exp
-  | ListE [Exp]
   | VarE Var
   deriving (Show)
 
