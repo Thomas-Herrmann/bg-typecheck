@@ -9,7 +9,6 @@ import SType
 import STypeCheck
 import Test.Hspec
 
-
 normSingle = head . Set.toList . normalizeConstraint
 
 constraintInclusionSpec = describe "constraintInclusion" $ do
@@ -45,10 +44,18 @@ constraintInclusionZ3Spec = describe "constraintInclusionZ3" $ do
 typeCheckSpec = describe "typeCheck" $ do
   -- Example 3.3.2 in the paper
   it "should check add process" $ do
-    checkProcess Set.empty Set.empty addProcGamma addProc `shouldReturn` Right zeroIndex
+    checkProcess Set.empty Set.empty combinedGamma addServProc `shouldReturn` Right zeroIndex
   -- Example 3.3.2 in the paper
   it "should check called add process" $ do
-    checkProcess Set.empty Set.empty addProcGamma proc1 `shouldReturn` Right (nIndex 10)
+    checkProcess Set.empty Set.empty combinedGamma proc1 `shouldReturn` Right (nIndex 10)
+  it "should check seq process" $ do
+    checkProcess Set.empty Set.empty combinedGamma seqServProc `shouldReturn` Right zeroIndex
+  it "should check called seq process" $ do
+    checkProcess Set.empty Set.empty combinedGamma proc2 `shouldReturn` Right (nIndex 10)
+  it "should check seqSq process" $ do
+    checkProcess Set.empty Set.empty combinedGamma seqSqServProc `shouldReturn` Right zeroIndex
+  it "should check called seqSq process" $ do
+    checkProcess Set.empty Set.empty combinedGamma (seqServProc :|: OutputP "seqSq" [natExp 9]) `shouldReturn` Right (nIndex 81)
 
 main :: IO ()
 main = do
@@ -58,7 +65,7 @@ main = do
 
 i : j : k : l : m : n : o : rest = [0 ..]
 
-[iM, jM, kM, lM, ijM] = [[i], [j], [k], [l], [i, j]]
+[iM, jM, kM, lM, mM, nM, ijM, jjM] = [[i], [j], [k], [l], [m], [n], [i, j], [j, j]]
 
 c1 = normalizeConstraint $ monIndex iM 3 .+. nIndex (-3) :<=: zeroIndex -- 3i - 3 <= 0
 
@@ -71,14 +78,21 @@ cnew = monIndex iM 1 .+. monIndex jM 1 .+. nIndex (-3) :<=: zeroIndex -- 1i + 1j
 [inCap, outCap, inOutCap] = [Set.singleton InputC, Set.singleton OutputC, Set.fromList [InputC, OutputC]]
 
 proc1 =
-  addProc
+  addServProc
     :|: RestrictP
       "r"
       (ChST (nIndex 10) [NatST (nIndex 15) (nIndex 15)] inOutCap)
       (OutputP "add" [natExp 10, natExp 5, VarE "r"] :|: InputP "r" ["v"] NilP)
 
+proc2 =
+  seqServProc
+    :|: RestrictP
+      "r"
+      (ChST (nIndex 10) [] inOutCap)
+      (OutputP "seq" [natExp 10, VarE "r"] :|: InputP "r" ["v"] NilP)
+
 -- !add(x, y, r).match x {0 -> r<y>; succ(z) -> tick.add<z, succ(yp), r>}
-addProc =
+addServProc =
   RepInputP
     "add"
     ["x", "y", "r"]
@@ -89,18 +103,82 @@ addProc =
         (TickP $ OutputP "add" [VarE "z", SuccE (VarE "y"), VarE "r"])
     )
 
--- add: A_0 i,j,k,l,m,n,o. serv_j^{in,out}(Nat[0,j], Nat[0,l], ch_j^{out}(Nat[0, j+l]))
-addProcGamma =
-  Map.singleton "add" $
-    ServST
-      zeroIndex
-      [i, j, k, l, m, n, o]
-      (monIndex jM 1)
-      [ (NatST zeroIndex (monIndex jM 1)),
-        (NatST zeroIndex (monIndex lM 1)),
-        ChST
-          (monIndex jM 1)
-          [(NatST zeroIndex (monIndex jM 1 .+. monIndex lM 1))]
-          outCap
-      ]
-      inOutCap
+-- !seq(n,r).match n { 0 :-> r<>; s(m) :-> tick.seq<m,r> }
+seqServProc =
+  RepInputP
+    "seq"
+    ["n", "r"]
+    ( MatchNatP
+        (VarE "n")
+        (OutputP "r" [])
+        "m"
+        ( TickP $
+            OutputP "seq" [VarE "m", VarE "r"]
+            --RestrictP
+            --  "r'"
+            --  (ChST (monIndex jM 1 .-. nIndex 1) [] inOutCap)
+            --  (OutputP "seq" [VarE "m", VarE "r'"] :|: InputP "r'" [] (OutputP "r" []))
+        )
+    )
+
+-- !seqSq(n).match n { 0 :-> 0; s(m) :-> (vr)(seq<m, r> | r().seqSq<m> ) }
+seqSqServProc =
+  seqServProc
+    :|: RepInputP
+      "seqSq"
+      ["n"]
+      ( MatchNatP
+          (VarE "n")
+          NilP
+          "m"
+          ( RestrictP
+              "r"
+              (ChST (monIndex jM 1 .-. nIndex 1) [] inOutCap)
+              (OutputP "seq" [VarE "m", VarE "r"] :|: InputP "r" [] (OutputP "seqSq" [VarE "m"]))
+          )
+      )
+
+combinedGamma =
+  Map.fromList
+    [ ("add", addType),
+      ("seq", seqType),
+      ("seqSq", seqSqType)
+    ]
+  where
+    -- add: \forall_0 i,j,k,l,m,n,o. serv_j^{in,out}(Nat[0,j], Nat[0,l], ch_j^{out}(Nat[0, j+l]))
+    addType =
+      ServST
+        zeroIndex
+        [i, j, k, l, m, n, o]
+        (monIndex jM 1)
+        [ NatST zeroIndex (monIndex jM 1),
+          NatST zeroIndex (monIndex lM 1),
+          ChST
+            (monIndex jM 1)
+            [NatST zeroIndex (monIndex jM 1 .+. monIndex lM 1)]
+            outCap
+        ]
+        inOutCap
+
+    -- seq: \forall_0 i,j,k. serv^{in,out}_i(Nat[0,i],ch^{out}_i())
+    seqType =
+      ServST
+        zeroIndex
+        [i, j, k]
+        (monIndex jM 1)
+        [ NatST zeroIndex (monIndex jM 1),
+          ChST
+            (monIndex jM 1)
+            []
+            outCap
+        ]
+        inOutCap
+
+    -- seqSq : \forall_0 l,j.serv^{in,out}_{j*j}(Nat[0,j])
+    seqSqType =
+      ServST
+        zeroIndex
+        [l, j]
+        (monIndex jjM 1)
+        [NatST zeroIndex (monIndex jM 1)]
+        inOutCap
