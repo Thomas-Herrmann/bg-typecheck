@@ -114,10 +114,6 @@ seqServProc =
         "m"
         ( TickP $
             OutputP "seq" [VarE "m", VarE "r"]
-            --RestrictP
-            --  "r'"
-            --  (ChST (monIndex jM 1 .-. nIndex 1) [] inOutCap)
-            --  (OutputP "seq" [VarE "m", VarE "r'"] :|: InputP "r'" [] (OutputP "r" []))
         )
     )
 
