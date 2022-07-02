@@ -6,11 +6,11 @@ cabal-version: 1.12
 --
 -- hash: 2ee66e24cc150bec9f7e141d550068f67127ecca8962be1ea1bd2be2bbcc6cb8
 
-name:           p10
+name:           bg-typecheck
 version:        0.1.0.0
-description:    Please see the README on GitHub at <https://github.com/githubuser/p10#readme>
-homepage:       https://github.com/githubuser/p10#readme
-bug-reports:    https://github.com/githubuser/p10/issues
+description:    Please see the README on GitHub at <https://github.com/githubuser/bg-typecheck#readme>
+homepage:       https://github.com/githubuser/bg-typecheck#readme
+bug-reports:    https://github.com/githubuser/bg-typecheck/issues
 author:         Author name here
 maintainer:     example@example.com
 copyright:      2022 Author name here
@@ -23,7 +23,7 @@ extra-source-files:
 
 source-repository head
   type: git
-  location: https://github.com/githubuser/p10
+  location: https://github.com/githubuser/bg-typecheck
 
 library
   exposed-modules:
@@ -36,7 +36,7 @@ library
     , SType
     , STypeCheck
   other-modules:
-      Paths_p10
+      Paths_bg_typecheck
   hs-source-dirs:
       src
   build-depends:
@@ -56,31 +56,31 @@ library
     , extra
   default-language: Haskell2010
 
-executable p10-exe
+executable bg-typecheck-exe
   main-is: Main.hs
   other-modules:
-      Paths_p10
+      Paths_bg_typecheck
   hs-source-dirs:
       app
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       base >=4.7 && <5
-    , p10
+    , bg-typecheck
     , containers
     , multiset
   default-language: Haskell2010
 
-test-suite p10-test
+test-suite bg-typecheck-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
-      Paths_p10
+      Paths_bg_typecheck
   hs-source-dirs:
       test
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       base >=4.7 && <5
-    , p10
+    , bg-typecheck
     , containers
     , multiset
     , dsp

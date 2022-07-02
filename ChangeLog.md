@@ -1,3 +1,3 @@
-# Changelog for p10
+# Changelog for bg-typecheck
 
 ## Unreleased changes
